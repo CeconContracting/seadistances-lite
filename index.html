@@ -1,0 +1,2556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sea Distances Lite</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- served locally (static/vendor/) so the UI works offline / behind firewalls -->
+<link rel="stylesheet" href="static/vendor/leaflet/leaflet.css">
+<script src="static/vendor/leaflet/leaflet.js"></script>
+<script src="static/vendor/sortable/Sortable.min.js"></script>
+<script>window.SEADIST_CONFIG = {"lite": true, "title": "Sea Distances Lite", "tileUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "tileAttribution": "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors", "tileMaxZoom": 19, "built": "2026-10-04"};</script>
+<script src="static/lite/lite-backend.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; height: 100vh;
+         display: flex; flex-direction: column; overflow: hidden; }
+  /* ---------- top bar ---------- */
+  #topbar { background: #1a2a40; color: #fff; display: flex; align-items: center;
+            padding: 6px 12px; gap: 8px; flex-wrap: wrap; }
+  #topbar h1 { font-size: 16px; margin: 0 18px 0 0; }
+  #topbar button { background: #2e4566; color: #fff; border: none; border-radius: 4px;
+                   padding: 5px 10px; cursor: pointer; font-size: 12px; }
+  #topbar button:hover { background: #3d5a85; }
+  #topbar label { font-size: 12px; display: flex; align-items: center; gap: 3px; cursor: pointer; }
+  .spacer { flex: 1; }
+  /* ---------- layout ---------- */
+  #main { flex: 1; display: flex; min-height: 0; }
+  #sidebar { width: 400px; min-width: 260px; max-width: 720px; background: #e9edf2; display: flex;
+             flex-direction: column; padding: 8px; gap: 8px; min-height: 0; overflow-y: auto; }
+  #sidebarResizer { width: 6px; flex: none; cursor: col-resize; background: #d3dae2;
+                    transition: background .15s; }
+  #sidebarResizer:hover, #sidebarResizer.dragging { background: #2196F3; }
+  #mapWrap { flex: 1; position: relative; }
+  #map { position: absolute; inset: 0; }
+  /* ---------- sidebar cards ---------- */
+  .card { background: #fff; border: 1px solid #d3dae2; border-radius: 8px; display: flex;
+          flex-direction: column; min-height: 0; overflow: hidden;
+          box-shadow: 0 1px 2px rgba(20,40,60,0.07); }
+  .card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                 padding: 8px 10px; font-weight: 600; font-size: 12.5px; color: #2c3e50;
+                 background: #f6f8fa; border-bottom: 1px solid #e3e9ef; flex: none; cursor: pointer;
+                 user-select: none; }
+  .card-header:hover { background: #eef2f6; }
+  .card-header .htitle { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .card-header .chev { color: #97a2ae; font-size: 10px; transition: transform .15s; flex: none; }
+  .card.collapsed .chev { transform: rotate(-90deg); }
+  .card-header small { font-weight: normal; color: #909caa; }
+  .badge { background: #2e4566; color: #fff; border-radius: 10px; padding: 1px 8px;
+           font-size: 11px; font-weight: 600; flex: none; }
+  .filter-input { margin: 6px 8px; padding: 4px 8px; border: 1px solid #d3dae2; border-radius: 5px;
+                  font-size: 12px; flex: none; }
+  .filter-input:focus { outline: none; border-color: #2196F3; }
+  /* expanded cards share vertical space; collapsed = header only */
+  #cardLib  { flex: 1 1 0; min-height: 120px; }
+  #cardRoute { flex: 1 1 0; min-height: 120px; }
+  #cardItin { flex: 1.6 1 0; min-height: 150px; }
+  #cardLayers { flex: 1 1 0; min-height: 110px; }
+  /* ---------- layers card ---------- */
+  .layer-item { display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+                border-bottom: 1px solid #f0f3f6; min-height: 28px; font-size: 12px; }
+  .layer-item:hover { background: #f4f8fc; }
+  .layer-item input[type=color] { width: 22px; height: 18px; padding: 0; border: none;
+                                  background: none; cursor: pointer; flex: none; }
+  .layer-item .lname { flex: 1; min-width: 0; border: 1px solid transparent; background: none;
+                       font: inherit; padding: 1px 3px; border-radius: 3px;
+                       text-overflow: ellipsis; }
+  .layer-item .lname:focus { border-color: #2196F3; background: #fff; outline: none; }
+  .layer-item .llen { color: #8a96a3; font-size: 11px; flex: none; }
+  .layer-item button { border: none; background: #eef2f6; border-radius: 4px; cursor: pointer;
+                       width: 22px; height: 20px; padding: 0; flex: none; font-size: 12px; }
+  .layer-item button:hover { background: #d7e3f0; }
+  .layer-item button.del:hover { background: #e57373; color: #fff; }
+  .layer-item.err { background: #fdecea; }
+  .layer-detail { padding: 6px 10px 8px 34px; font-size: 11.5px; color: #555;
+                  border-bottom: 1px solid #f0f3f6; background: #fafcfe; }
+  .layer-detail .lerr { color: #c62828; margin-bottom: 4px; }
+  .layer-detail select, .layer-detail input { font-size: 11.5px; }
+  .card-header .hbtn { border: none; background: #2196F3; color: #fff; border-radius: 4px;
+                       padding: 1px 8px; font-size: 11px; cursor: pointer; flex: none; }
+  .tiles-light { filter: grayscale(1) brightness(1.05) contrast(0.9); }
+  /* ---------- Lite (public web) build: tools/build_lite.py ---------- */
+  body.lite .exe-only { display: none !important; }
+  body:not(.lite) .lite-only { display: none !important; }
+  #liteNote { flex: none; font-size: 11px; color: #5d6b78; background: #fff8e1; border: 1px solid #ffe082;
+              border-radius: 6px; padding: 6px 8px; line-height: 1.4; }
+  .lib-item.world span small { color: #8a96a3; margin-left: 4px; }
+  .lib-item.world button { background: #e3f2fd; color: #1565c0; }
+  .lib-section { padding: 4px 10px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px;
+                 color: #8a96a3; background: #f6f8fa; border-bottom: 1px solid #eef2f5; }
+  /* ---------- globe view (MapLibre, loaded on first use) ---------- */
+  #globe { position: absolute; inset: 0; z-index: 1100; display: none;
+           background: radial-gradient(circle at 50% 50%, #12304f 0%, #07111d 70%); }
+  #globe.show { display: block; }
+  #globeClose { position: absolute; top: 10px; left: 10px; z-index: 2; background: #fff;
+                border: 1px solid #c8d1db; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+                font-size: 12.5px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  #globeClose:hover { background: #eef4fb; }
+  .globe-pt { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff;
+              background: #2A81CB; box-shadow: 0 0 3px rgba(0,0,0,.6); cursor: default; }
+  .help { color: #6b7783; font-size: 11.5px; margin: -2px 0 10px 138px; line-height: 1.45; }
+  .fmt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin: 4px 0 10px; }
+  .fmt-grid label { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; cursor: pointer; }
+  .fmt-grid small { color: #8a96a3; display: block; }
+  .card.collapsed { flex: 0 0 auto; min-height: 0; }
+  .card.collapsed > *:not(.card-header) { display: none; }
+  .scroll-list { overflow-y: auto; flex: 1; min-height: 0; }
+  .scroll-list::-webkit-scrollbar, #itinWrap::-webkit-scrollbar { width: 8px; }
+  .scroll-list::-webkit-scrollbar-thumb, #itinWrap::-webkit-scrollbar-thumb {
+    background: #c3ccd6; border-radius: 4px; }
+  .lib-item, .route-item { display: flex; align-items: center; padding: 4px 10px;
+                           border-bottom: 1px solid #f0f3f6; gap: 8px; min-height: 28px; }
+  .lib-item:hover, .route-item:hover { background: #f4f8fc; }
+  .lib-item span, .route-item span { flex: 1; overflow: hidden; text-overflow: ellipsis;
+                                     white-space: nowrap; min-width: 0; }
+  .lib-item button, .route-item button { width: 20px; height: 20px; border: none; border-radius: 4px;
+                                         cursor: pointer; font-weight: bold; line-height: 1;
+                                         flex: none; font-size: 12px; }
+  .lib-item button { background: #e8f5e9; color: #2e7d32; }
+  .lib-item button:hover { background: #4CAF50; color: #fff; }
+  .route-item button { background: #fdecea; color: #c62828; }
+  .route-item button:hover { background: #e57373; color: #fff; }
+  .route-item { cursor: grab; }
+  .route-item.sortable-ghost { opacity: 0.4; background: #dbeaff; }
+  #btnRow { display: flex; gap: 8px; flex: none; }
+  #btnRow button { flex: 1; border: none; border-radius: 6px; padding: 9px 4px; color: #fff;
+                   font-weight: bold; cursor: pointer; font-size: 12px; letter-spacing: 0.2px; }
+  #btnCalc { background: #2196F3; } #btnCalc:hover { background: #1d86db; }
+  #btnOpt { background: #4CAF50; } #btnOpt:hover { background: #449a48; }
+  #btnCalc:disabled, #btnOpt:disabled { opacity: 0.6; cursor: wait; }
+  /* generic tables (modals) */
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { border: 1px solid #ddd; padding: 3px 5px; text-align: left; font-size: 12px; }
+  th { background: #e8edf2; }
+  /* ---------- itinerary table (fixed layout - cannot overflow) ---------- */
+  #itinWrap { overflow-y: auto; flex: 1; min-height: 0; }
+  #itinerary { table-layout: fixed; width: 100%; }
+  #itinerary th, #itinerary td { border: none; border-bottom: 1px solid #eef2f5; padding: 4px 6px;
+    font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #itinerary th { position: sticky; top: 0; z-index: 1; background: #f6f8fa; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.4px; color: #67737f; border-bottom: 1px solid #e3e9ef; }
+  #itinerary td.num, #itinerary th.num { text-align: right; }
+  .landWarn { color: #FFB300; cursor: help; font-size: 9px; vertical-align: middle; }
+  .nearWarn { color: #F9A825; cursor: help; font-size: 10px; vertical-align: middle; }
+  .spd-input { width: 100%; border: 1px solid transparent; background: #f2f6fa; border-radius: 4px;
+               text-align: right; padding: 2px 4px; font-size: 12px; font-family: inherit; }
+  .spd-input:focus { border-color: #2196F3; background: #fff; outline: none; }
+  .spd-input.bad { border-color: #e57373; background: #fdecea; }
+  #totals { flex: none; display: flex; gap: 16px; padding: 6px 10px; font-weight: 600;
+            font-size: 12px; background: #f6f8fa; border-top: 1px solid #e3e9ef; }
+  #totalRaw { color: #2196F3; } #totalOpt { color: #4CAF50; }
+  #statusBar { color: #555; font-size: 12px; min-height: 16px; flex: none; }
+  /* ---------- modals ---------- */
+  .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 2000;
+              align-items: center; justify-content: center; }
+  .modal-bg.show { display: flex; }
+  .modal { background: #fff; border-radius: 8px; padding: 16px; max-height: 85vh; overflow-y: auto;
+           min-width: 380px; max-width: 640px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+  .modal h3 { margin: 0 0 12px 0; }
+  .modal .form-row { display: flex; align-items: center; margin-bottom: 8px; gap: 8px; }
+  .modal .form-row label { width: 130px; }
+  .modal input[type=text], .modal input[type=number], .modal select {
+    flex: 1; padding: 4px 6px; border: 1px solid #bbb; border-radius: 4px; }
+  .modal .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .modal button { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; }
+  .btn-primary { background: #2196F3; color: #fff; } .btn-danger { background: #e57373; color: #fff; }
+  .btn-plain { background: #ddd; }
+  .modal table input { width: 100%; border: 1px solid transparent; padding: 2px 3px; }
+  .modal table input:focus { border-color: #2196F3; outline: none; }
+  /* ---------- legend (anchored inside the map, not over the sidebar) ---------- */
+  #legend { position: absolute; bottom: 24px; left: 12px; z-index: 1000; background: #fff;
+            border: 2px solid grey; border-radius: 5px; padding: 10px; font-size: 12px; opacity: 0.95; }
+  #legend h4 { margin: 0 0 8px 0; }
+  .leg-line { display: inline-block; width: 22px; margin-right: 6px; vertical-align: middle; }
+  /* ---------- mouse position readout ---------- */
+  #mousePos { position: absolute; bottom: 20px; right: 2px; z-index: 1000; background: rgba(255,255,255,0.85);
+              padding: 2px 8px; border-radius: 4px 0 0 0; font-size: 12px; font-family: Consolas, monospace;
+              pointer-events: none; color: #333; }
+  /* ---------- measure tool (top-left, clear of the pilot panel) ---------- */
+  #measureInfo { display: none; position: absolute; top: 12px; left: 56px; z-index: 1000;
+                 background: #fff; border: 2px solid #9C27B0; border-radius: 6px; padding: 8px 12px;
+                 font-size: 12px; max-width: 260px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+  #measureInfo b { color: #9C27B0; }
+  #measureInfo .mi-hint { color: #888; font-size: 11px; }
+  .mi-btns { display: flex; gap: 6px; margin-top: 8px; }
+  .mi-btns button { flex: 1; border: 1px solid #9C27B0; background: #fff; color: #9C27B0;
+                    border-radius: 4px; padding: 4px 6px; font-size: 11.5px; cursor: pointer; }
+  .mi-btns button:hover { background: #9C27B0; color: #fff; }
+  .measure-label { background: rgba(255,255,255,0.9) !important; border: 1px solid #9C27B0 !important;
+                   border-radius: 3px !important; padding: 0 4px !important; font-size: 11px !important;
+                   color: #6A1B9A !important; box-shadow: none !important; white-space: nowrap; }
+  .measure-label::before { display: none !important; }
+  /* ---------- pilot panel (floating, non-modal: map stays interactive) ---------- */
+  #mdlPilot { display: none; position: fixed; top: 56px; right: 12px; z-index: 1500; width: 360px;
+              background: #fff; border: 1px solid #c4cdd6; border-radius: 8px;
+              box-shadow: 0 8px 28px rgba(0,0,0,0.3); max-height: calc(100vh - 80px);
+              flex-direction: column; overflow: hidden; }
+  #mdlPilot.show { display: flex; }
+  #pilotHeader { cursor: move; padding: 8px 12px; background: #1a2a40; color: #fff; flex: none;
+                 font-weight: 600; font-size: 13px; display: flex; justify-content: space-between;
+                 align-items: center; user-select: none; }
+  #pilotHeader span.close { cursor: pointer; font-weight: bold; padding: 0 4px; }
+  #pilotHeader span.close:hover { color: #ff8a80; }
+  #pilotBody { padding: 10px 12px; overflow-y: auto; }
+  #pilotBody table input { width: 100%; border: 1px solid transparent; padding: 2px 3px; }
+  #pilotBody table input:focus { border-color: #2196F3; outline: none; }
+  #pilotBody select { padding: 3px 6px; border: 1px solid #bbb; border-radius: 4px; }
+  #pilotBody .prow-selected { background: #ffe4ef !important; }
+  #pilotBody .btn-row button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; }
+  /* ---------- map context menu ---------- */
+  .ctx-popup .leaflet-popup-content { margin: 10px 12px; }
+  .ctx-popup button { display: block; width: 100%; margin-top: 5px; padding: 4px; border: none;
+                      border-radius: 4px; background: #2e4566; color: #fff; cursor: pointer; }
+  .ctx-popup select, .ctx-popup input { width: 100%; margin-top: 5px; padding: 3px; }
+  #toast { position: fixed; bottom: 18px; right: 18px; background: #323232; color: #fff;
+           padding: 10px 16px; border-radius: 6px; z-index: 3000; display: none; max-width: 380px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>⚓ Sea Distances <small id="appVersion" style="font-size:11px;font-weight:normal;opacity:.6"></small></h1>
+  <button onclick="openModal('mdlLibrary'); renderLibTable()">Library</button>
+  <button onclick="openPilotMgr()">Pilot Points</button>
+  <button class="exe-only" onclick="openVessels()">Vessel Tracker</button>
+  <button onclick="openLayerUpload()" title="Upload a route, track, cable, border... as a background layer">🗂 Add Layer</button>
+  <button onclick="openModal('mdlConvert')">Converter</button>
+  <button onclick="openSave()">Save Route</button>
+  <button onclick="document.getElementById('fileLoad').click()" title="Open a route saved as Route file (.json)">Load Route</button>
+  <button onclick="copyRouteLink()" title="Copy a link that opens this route in Sea Distances">🔗 Link</button>
+  <input type="file" id="fileLoad" accept=".json" style="display:none" onchange="loadRoute(this)">
+  <button onclick="clearTempPoints()" title="Remove all temporary waypoints (Temp 1, 2, ...)">🧹 Clear Temp</button>
+  <div class="spacer"></div>
+  <label>Base
+    <select id="baseMap" onchange="setBase(this.value)">
+      <option value="light">Light (OSM)</option>
+      <option value="street">Street (OSM)</option>
+      <option value="depth">Depth (GEBCO)</option>
+    </select></label>
+  <label><input type="checkbox" id="chkCharts" onchange="toggleCharts()"> Charts (NO)</label>
+  <label class="exe-only" title="Show GEBCO seabed depth under the cursor (any base map)"><input type="checkbox" id="chkDepthHover"> Depth on hover</label>
+  <label><input type="checkbox" id="chkSeamap" onchange="toggleSeamap()"> OpenSeaMap</label>
+  <label><input type="checkbox" id="chkUtm" onchange="toggleUtm()"> UTM zones</label>
+  <label title="Show the background layers (see the Layers panel)"><input type="checkbox" id="chkLayers" onchange="toggleLayers()"> Layers</label>
+  <label><input type="checkbox" id="chkNetwork" onchange="toggleNetwork()"> Network (red)</label>
+  <label class="exe-only"><input type="checkbox" id="chkLand" onchange="toggleLand()"> Land (green)</label>
+  <button id="btnMeasure" onclick="toggleMeasure()">📏 Measure</button>
+  <button id="btnGlobe" onclick="toggleGlobe()" title="View the route and layers on a 3D globe">🌐 Globe</button>
+  <button onclick="openSettings()">⚙ Settings</button>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div class="card" id="cardLib">
+      <div class="card-header" onclick="toggleCard('cardLib')">
+        <span class="htitle"><span class="chev">▼</span>Location Library <small>click a port to add it</small></span>
+        <span class="badge" id="libCount">0</span></div>
+      <input type="text" class="filter-input" id="libFilter" placeholder="Filter ports..." oninput="renderLibrary()">
+      <div class="scroll-list" id="libList"></div>
+    </div>
+    <div class="card" id="cardRoute">
+      <div class="card-header" onclick="toggleCard('cardRoute')">
+        <span class="htitle"><span class="chev">▼</span>Route Builder <small>drag to reorder</small></span>
+        <span class="badge" id="routeCount">0</span></div>
+      <div class="scroll-list" id="routeList"></div>
+    </div>
+    <div id="btnRow">
+      <button id="btnCalc" onclick="calculateRaw()">1. CALCULATE RAW</button>
+      <button id="btnOpt" class="exe-only" onclick="runOptimizer()">2. RUN OPTIMIZER</button>
+    </div>
+    <div class="card" id="cardItin">
+      <div class="card-header" onclick="toggleCard('cardItin')">
+        <span class="htitle"><span class="chev">▼</span>Itinerary <small>speed editable per leg</small></span></div>
+      <div id="itinWrap">
+        <table id="itinerary">
+          <colgroup><col style="width:25%"><col style="width:25%"><col style="width:18%">
+                    <col style="width:13%"><col style="width:19%"></colgroup>
+          <thead><tr><th>From</th><th>To</th><th class="num">Dist</th><th class="num">kn</th><th>Time</th></tr></thead>
+          <tbody><tr><td colspan="5" style="color:#98a3af;font-style:italic">No route calculated yet</td></tr></tbody>
+        </table>
+      </div>
+      <div id="totals"><span id="totalRaw">Raw: 0</span><span id="totalOpt" class="exe-only">Optimized: 0</span></div>
+    </div>
+    <div class="card" id="cardLayers">
+      <div class="card-header" onclick="toggleCard('cardLayers')">
+        <span class="htitle"><span class="chev">▼</span>Layers <small>background files</small></span>
+        <span style="display:flex;gap:6px;align-items:center">
+          <button class="hbtn" onclick="event.stopPropagation(); openLayerUpload()" title="Upload a file">+ Add</button>
+          <span class="badge" id="layerCount">0</span></span></div>
+      <div class="scroll-list" id="layerList"></div>
+    </div>
+    <div id="statusBar"></div>
+    <div id="liteNote" class="lite-only">
+      <b>Planning aid - not for navigation.</b> Routes follow the shipping-lane network
+      (Eurostat marnet, via searoute) and are not checked against the coastline.
+      Your ports, routes and layers are stored only in this browser.
+    </div>
+  </div>
+  <div id="sidebarResizer" title="Drag to resize"></div>
+  <div id="mapWrap">
+    <div id="map"></div>
+    <div id="globe"><button id="globeClose" onclick="toggleGlobe()">✕ Back to flat map</button></div>
+    <div id="legend" style="display:none">
+      <h4>Map Legend</h4>
+      <span class="leg-line" style="border-top:3px solid #2196F3"></span>Raw Route<br>
+      <span class="leg-line" style="border-top:4px solid #4CAF50"></span>Optimized Route<br>
+      <span class="leg-line" style="border-top:2px dashed gray"></span>Ghost Route<br>
+      <span class="leg-line" style="border-top:2px dashed orange"></span>Pilotage Point<br>
+      <span class="leg-line" style="border-top:2px dashed black"></span>Vessel Track<br>
+      <span class="leg-line" style="border-top:4px solid #FFB300"></span>Touches Coastline<br>
+      <span class="leg-line" style="border-top:4px dotted #F9A825"></span>Close to Coastline<br>
+      <span style="font-size:14px">➤</span> Direction Arrow
+    </div>
+    <div id="mousePos">—</div>
+    <div id="measureInfo"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- ============ Settings modal ============ -->
+<div class="modal-bg" id="mdlSettings"><div class="modal">
+  <h3>Settings</h3>
+  <div class="form-row"><label>Measurement Unit</label>
+    <select id="setUnit"><option value="0">Nautical Miles (NM)</option><option value="1">Kilometers (km)</option></select></div>
+  <div class="form-row"><label>Default Speed (kn)</label>
+    <input type="text" inputmode="decimal" id="setSpeed" placeholder="10"></div>
+  <div class="form-row exe-only"><label>Coastline Detail</label>
+    <select id="setRes">
+      <option>Intermediate (fast)</option>
+      <option>High (recommended)</option>
+      <option>Full (max detail)</option>
+    </select></div>
+  <div class="form-row"><label>Show Legend</label><input type="checkbox" id="setLegend" style="flex:none"></div>
+  <div class="form-row"><label>Coordinate Format</label>
+    <select id="setCoordFmt">
+      <option value="dd">Decimal degrees (59.90280, 10.74260)</option>
+      <option value="ddm">Degrees, decimal minutes (59°54.168'N)</option>
+      <option value="dms">Degrees, minutes, seconds (59°54'10.1"N)</option>
+    </select></div>
+  <div class="form-row exe-only"><label>AIS API Key</label>
+    <input type="text" id="setAisKey" placeholder="Free key from aisstream.io"></div>
+  <div class="help exe-only">Only the <b>Vessel Tracker</b> needs a key - everything else works without one.
+    To get a free key:<br>
+    1. Go to <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a> and sign in
+       (it uses a GitHub account - create one free at github.com if needed).<br>
+    2. Open <b>API Keys</b> and click <b>Create API key</b>.<br>
+    3. Paste the key above and Save. It is shared with the team through the app folder.</div>
+  <div class="btn-row">
+    <button class="btn-plain" onclick="closeModal('mdlSettings')">Cancel</button>
+    <button class="btn-primary" onclick="saveSettings()">Save</button>
+  </div>
+</div></div>
+
+<!-- ============ Library modal ============ -->
+<div class="modal-bg" id="mdlLibrary"><div class="modal" style="min-width:520px">
+  <h3>Manage Location Library</h3>
+  <table><thead><tr><th>Name</th><th>Lat</th><th>Lon</th><th></th></tr></thead>
+  <tbody id="libTableBody"></tbody></table>
+  <div class="form-row" style="margin-top:10px">
+    <input type="text" id="newLocName" placeholder="Name">
+    <input type="text" id="newLocLat" placeholder="Lat" style="max-width:90px">
+    <input type="text" id="newLocLon" placeholder="Lon" style="max-width:90px">
+    <button class="btn-primary" onclick="addLocation()">Add</button>
+    <button class="btn-plain" onclick="startLocPick()"
+      title="Click a spot on the map instead of typing coordinates">📍 Pick on map</button>
+  </div>
+  <div class="btn-row"><button class="btn-plain" onclick="closeModal('mdlLibrary')">Close</button></div>
+</div></div>
+
+<!-- ============ Pilot manager: floating panel (map stays interactive) ============ -->
+<div id="mdlPilot">
+  <div id="pilotHeader"><span>⚓ Pilot Point Manager</span><span class="close" onclick="closePilotMgr()">✕</span></div>
+  <div id="pilotBody">
+    <div class="form-row"><label style="width:40px">Port</label>
+      <select id="pilotPort" style="flex:1" onchange="pilotSelection=null; renderPilotTable(); renderMarkers()"></select></div>
+    <table><thead><tr><th>#</th><th>Lat</th><th>Lon</th><th>Belongs to</th><th></th></tr></thead>
+    <tbody id="pilotTableBody"></tbody></table>
+    <div class="btn-row" style="justify-content:flex-start; margin-top:10px">
+      <button class="btn-primary" onclick="pilotAdd()">Add Point</button>
+      <button class="btn-plain" onclick="pilotMove(-1)">↑</button>
+      <button class="btn-plain" onclick="pilotMove(1)">↓</button>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#444;cursor:pointer">
+      <input type="checkbox" id="chkPilotDrag" onchange="togglePilotDrag()">
+      Allow dragging pilot markers on the map
+    </label>
+    <p style="color:#777;font-size:11.5px;margin-bottom:0">Click a row to highlight its marker on the map —
+    click a marker to highlight its row here. Right-click the map to add a point at that spot.
+    "Belongs to" moves a point to another port. Marker dragging is off by default so points can't be
+    moved by accident.</p>
+  </div>
+</div>
+
+<!-- ============ Vessel tracker modal ============ -->
+<div class="modal-bg" id="mdlVessel"><div class="modal" style="min-width:460px">
+  <h3>Vessel Tracker (Live AIS)</h3>
+  <div class="form-row"><label>Vessel Name</label><input type="text" id="vesName" placeholder="e.g. Cecon Vigor"></div>
+  <div class="form-row"><label>MMSI</label><input type="text" id="vesMmsi" placeholder="9-digit MMSI, e.g. 259211000"></div>
+  <div class="form-row"><label>Origin Port</label><input type="text" id="vesOrigin" placeholder="Optional"></div>
+  <div class="form-row"><label>Dest Port</label><input type="text" id="vesDest" placeholder="Optional"></div>
+  <div class="btn-row" style="justify-content:flex-start">
+    <button class="btn-primary" onclick="saveVessel()">Save Vessel</button>
+  </div>
+  <table><thead><tr><th>Vessel</th><th>MMSI</th><th>Last position</th><th>Age</th></tr></thead>
+  <tbody id="vesselTableBody"></tbody></table>
+  <p style="color:#777;font-size:12px;margin:6px 0">Vessels with an MMSI are tracked automatically in the
+  background while the app is running — positions refresh on the map every 20 s.</p>
+  <div id="vesselNoKey" style="display:none;background:#fff8e1;border:1px solid #ffe082;border-radius:5px;
+       padding:6px 8px;font-size:12px;margin:6px 0">No AIS key is set, so live positions can't be fetched.
+       A free key takes two minutes - see <a href="#" onclick="closeModal('mdlVessel'); openSettings(); return false">Settings</a>.</div>
+  <div id="vesselStatus" style="margin-top:4px;color:#555;min-height:18px"></div>
+  <div class="btn-row" style="justify-content:flex-start">
+    <button class="btn-primary" id="btnVesFetch" onclick="fetchVessel()">Fetch Now</button>
+    <button class="btn-plain" onclick="plotVessel()">Show on Map</button>
+    <button class="btn-plain" id="btnVesEta" onclick="vesselEta()">Route &amp; ETA</button>
+    <button class="btn-danger" onclick="deleteVessel()">Delete</button>
+  </div>
+  <p style="color:#777;font-size:12px;margin:6px 0">Route &amp; ETA draws the remaining route
+  from the vessel's live position to its destination port and estimates arrival at the default speed.</p>
+  <div class="btn-row"><button class="btn-plain" onclick="closeModal('mdlVessel')">Close</button></div>
+</div></div>
+
+<!-- ============ Layer upload modal ============ -->
+<div class="modal-bg" id="mdlLayers"><div class="modal" style="min-width:560px;max-width:640px">
+  <h3>Add Background Layer</h3>
+  <p style="color:#777;font-size:12px;margin:0 0 10px">
+    Any route, vessel track, cable, border or corridor to show behind your routes.
+    <span class="exe-only">Files are stored in the <code>layers</code> folder next to the app, so the whole team sees them
+    once SharePoint has synced. Which layers you show is remembered in this browser.</span></p>
+  <div class="form-row"><label>File(s)</label>
+    <input type="file" id="layerFile" multiple style="flex:1"
+      accept=".kml,.kmz,.geojson,.json,.gpx,.zip,.gpkg,.dxf,.gml,.fgb,.csv,.txt,.xlsx"></div>
+  <div class="help lite-only" style="margin-top:-4px">KML, KMZ, GeoJSON, GPX, and tables
+    (CSV / TXT / XLSX with Lat/Lon columns, decimal or deg-min). Route files saved from this app load
+    back as layers. Layers are kept in this browser only. (Shapefile, DXF and GeoPackage need the
+    desktop version.)</div>
+  <div class="help exe-only" style="margin-top:-4px">KML, KMZ, GeoJSON, GPX, shapefile (zip the .shp, .shx, .dbf and .prj
+    together), GeoPackage, DXF, GML, FlatGeobuf, and tables (CSV / TXT / XLSX with Lat/Lon or
+    Easting/Northing columns). Route files saved from this app (any format) load back as layers.</div>
+  <div class="form-row exe-only"><label>Coordinate System</label>
+    <select id="layerCrs" style="flex:1" onchange="crsSelectChanged(this)"></select>
+    <input type="text" id="layerCrsOther" placeholder="EPSG code, e.g. 23032" style="display:none;max-width:150px"></div>
+  <div class="help exe-only" style="margin-top:-4px"><b>DXF needs one</b> - DXF files don't say which system they are in
+    (ours are usually UTM). Also needed for tables with Easting/Northing and shapefiles without a .prj.
+    Leave on Auto for everything else.</div>
+  <div class="form-row"><label>Display Name</label>
+    <input type="text" id="layerName" placeholder="Optional - defaults to the file name" style="flex:1"></div>
+  <div id="layerStatus" style="min-height:18px;color:#555;font-size:12px;margin:4px 0 6px"></div>
+  <div class="btn-row">
+    <button class="btn-plain" onclick="closeModal('mdlLayers')">Close</button>
+    <button class="btn-primary" id="btnLayerUpload" onclick="uploadLayers()">Upload</button>
+  </div>
+</div></div>
+
+<!-- ============ Save route modal ============ -->
+<div class="modal-bg" id="mdlSave"><div class="modal" style="min-width:560px;max-width:640px">
+  <h3>Save Route</h3>
+  <div class="form-row"><label>Name</label><input type="text" id="saveName" style="flex:1"></div>
+  <div style="font-size:12px;color:#555;margin:6px 0 2px">Format</div>
+  <div class="fmt-grid" id="saveFormats">
+    <label><input type="radio" name="saveFmt" value="json" checked><span>Route file (.json)
+      <small>Re-open later with Load Route and edit</small></span></label>
+    <label><input type="radio" name="saveFmt" value="kml"><span>KML (.kml)
+      <small>Google Earth</small></span></label>
+    <label><input type="radio" name="saveFmt" value="geojson"><span>GeoJSON (.geojson)
+      <small>QGIS, web maps</small></span></label>
+    <label><input type="radio" name="saveFmt" value="gpx"><span>GPX (.gpx)
+      <small>Chart plotters, voyage planning tools</small></span></label>
+    <label><input type="radio" name="saveFmt" value="csv"><span>CSV (.csv)
+      <small>Route position list: lat/lon, leg, course</small></span></label>
+    <label class="exe-only"><input type="radio" name="saveFmt" value="shp"><span>Shapefile (.zip)
+      <small>ArcGIS, QGIS</small></span></label>
+    <label><input type="radio" name="saveFmt" value="dxf"><span>DXF (.dxf)
+      <small>AutoCAD - in projected metres</small></span></label>
+  </div>
+  <div class="form-row" id="saveCrsRow" style="display:none"><label>DXF Coordinates</label>
+    <select id="saveCrs" style="flex:1" onchange="crsSelectChanged(this)"></select>
+    <input type="text" id="saveCrsOther" placeholder="EPSG code" style="display:none;max-width:150px"></div>
+  <div class="help" id="saveHelp">All map formats hold the route points and the full drawn route
+    (optimized if you ran the optimizer, else raw), and can be uploaded again as a background layer.</div>
+  <div class="btn-row">
+    <button class="btn-plain" onclick="closeModal('mdlSave')">Cancel</button>
+    <button class="btn-plain" onclick="saveRouteAsLayer()" title="Store the route in the shared Layers panel">Add to Layers</button>
+    <button class="btn-primary" onclick="saveRouteFile()">Download</button>
+  </div>
+</div></div>
+
+<!-- ============ Converter modal ============ -->
+<div class="modal-bg" id="mdlConvert"><div class="modal">
+  <h3>Coordinate Converter (WGS84 ↔ UTM)</h3>
+  <fieldset style="border:1px solid #ccc;border-radius:5px;margin-bottom:10px">
+    <legend>Lat / Lon (decimal degrees)</legend>
+    <div class="form-row"><label>Latitude</label><input type="text" id="cvLat" placeholder="e.g. 59.9028"></div>
+    <div class="form-row"><label>Longitude</label><input type="text" id="cvLon" placeholder="e.g. 10.7426"></div>
+    <button class="btn-primary" onclick="convert('to_utm')">Convert ↓ to UTM</button>
+  </fieldset>
+  <fieldset style="border:1px solid #ccc;border-radius:5px">
+    <legend>UTM (Easting / Northing)</legend>
+    <div class="form-row"><label>Easting</label><input type="text" id="cvEast"></div>
+    <div class="form-row"><label>Northing</label><input type="text" id="cvNorth"></div>
+    <div class="form-row"><label>Zone / Letter</label>
+      <input type="text" id="cvZone" placeholder="32" style="max-width:70px">
+      <input type="text" id="cvLetter" placeholder="V" style="max-width:50px"></div>
+    <button class="btn-primary" onclick="convert('to_ll')">Convert ↑ to Lat/Lon</button>
+  </fieldset>
+  <div class="btn-row"><button class="btn-plain" onclick="closeModal('mdlConvert')">Close</button></div>
+</div></div>
+
+<script>
+// Lite (public web) build: tools/build_lite.py sets SEADIST_CONFIG and loads
+// lite-backend.js, which answers the /api/... calls in the browser.
+const CFG = window.SEADIST_CONFIG || {};
+const LITE = !!CFG.lite && !!window.LiteBackend;
+"use strict";
+// ================================================================ state
+let state = { locations: {}, temp_waypoints: {}, pilotage: {}, vessels: {}, settings: {} };
+let route = [];            // ordered location names
+let legsCache = null;      // raw legs from last CALCULATE (for the optimizer)
+let legsCacheKey = '';     // route the cache belongs to - any change invalidates it
+let totalRawKm = 0, totalOptKm = 0;
+let rawLegKm = [], optLegKm = [];   // per-leg distances, so each total gets its own time
+let selectedVessel = null;
+let legSpeeds = [];        // kn per leg (parallel to itinerary rows)
+let lastRows = [];         // current itinerary rows (raw or optimized)
+let nearMissNm = 0.25;     // validation near-miss limit (nm) - the server sends the real value
+
+// ================================================================ map
+// ---- the date line ----------------------------------------------------
+// Leaflet draws a vector layer once, at the longitudes it is given, while
+// the tiles repeat every 360 degrees. A route from the US to Japan therefore
+// drew a line straight back across the whole map, and with the view
+// centred on the Pacific half of it (and the markers) were missing. Lines
+// are now "unwrapped" (no jumps over 180 degrees between points) and every
+// line and marker is drawn in three copies, 360 degrees apart.
+const WORLD = [-360, 0, 360];
+function wrapLon(lon) { return ((lon + 180) % 360 + 360) % 360 - 180; }
+function unwrapLine(coords) {
+  const out = [];
+  for (const p of coords) {
+    const lat = Array.isArray(p) ? +p[0] : p.lat, raw = Array.isArray(p) ? +p[1] : p.lng;
+    let lon = raw;
+    if (out.length) {
+      const prev = out[out.length - 1][1];
+      while (lon - prev > 180) lon -= 360;
+      while (lon - prev < -180) lon += 360;
+    }
+    out.push([lat, lon]);
+  }
+  return out;
+}
+// add a polyline in all world copies; returns the copies
+function addLineWorld(coords, opts, group) {
+  const u = unwrapLine(coords);
+  return WORLD.map(off => L.polyline(u.map(p => [p[0], p[1] + off]), opts).addTo(group));
+}
+// make(latlng) builds one marker; it is called once per world copy
+function addMarkerWorld(latlng, make, group) {
+  const lat = Array.isArray(latlng) ? +latlng[0] : latlng.lat;
+  const lon = Array.isArray(latlng) ? +latlng[1] : latlng.lng;
+  return WORLD.map(off => make([lat, lon + off]).addTo(group));
+}
+
+const map = L.map('map', { zoomControl: true, worldCopyJump: true })
+  .setView(JSON.parse(localStorage.getItem('mapCenter') || '[20,0]'),
+           parseInt(localStorage.getItem('mapZoom') || '3'));
+
+// ---- single base map (only one full-coverage layer at a time) ----
+// CARTO's free basemaps now answer "API key required", so both street maps
+// are OpenStreetMap's own tiles - 'light' is the same tiles greyed with CSS.
+function makeBase(kind) {
+  let layer;
+  if (kind === 'depth') {
+    layer = L.tileLayer.wms('https://wms.gebco.net/mapserv?', {
+      layers: 'GEBCO_LATEST', format: 'image/png', version: '1.3.0',
+      transparent: false, maxZoom: 18, attribution: 'GEBCO bathymetry' });
+  } else {
+    layer = L.tileLayer(CFG.tileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: CFG.tileAttribution ||
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: CFG.tileMaxZoom || 19, className: kind === 'street' ? '' : 'tiles-light' });
+  }
+  warnOnTileError(layer, kind === 'depth' ? 'GEBCO' : (CFG.tileUrl ? 'Base map' : 'OpenStreetMap'));
+  return layer;
+}
+// one toast per layer when its tiles fail (blocked by a firewall, offline,
+// provider down) - otherwise a failing layer just looks empty
+function warnOnTileError(layer, provider) {
+  let warned = false;
+  layer.on('tileerror', () => {
+    if (warned) return;
+    warned = true;
+    toast(`${provider} map tiles could not be loaded (offline, blocked by the network, ` +
+          `or the service is down). Routing still works.`, 7000);
+  });
+}
+const BASE_KINDS = ['light', 'street', 'depth'];
+let baseLayer = makeBase(BASE_KINDS.includes(localStorage.getItem('baseMap'))
+                         ? localStorage.getItem('baseMap') : 'light');
+baseLayer.setZIndex(0).addTo(map);
+function setBase(kind) {
+  if (baseLayer) map.removeLayer(baseLayer);
+  baseLayer = makeBase(kind);
+  baseLayer.setZIndex(0).addTo(map);
+  localStorage.setItem('baseMap', kind);
+  globeBase(kind);
+}
+
+map.on('moveend', () => {
+  const c = map.getCenter();
+  localStorage.setItem('mapCenter', JSON.stringify([c.lat, c.lng]));
+  localStorage.setItem('mapZoom', map.getZoom());
+});
+
+// live mouse position readout (lat/lon, decimal degrees) + optional hover depth
+const _depthCache = new Map();   // "lat.xx,lon.xx" -> elev_m, GEBCO grid cells
+let _depthTimer = null, _depthInflight = false, _hoverKey = '', _lastFetchAt = 0;
+let _lastDepthText = '';         // keep showing the last value while fetching the next
+function _depthKey(lat, lon) {   // ~0.05deg cell so nearby hovers reuse one query
+  return `${(Math.round(lat / 0.05) * 0.05).toFixed(2)},${(Math.round(lon / 0.05) * 0.05).toFixed(2)}`;
+}
+function _fmtDepth(e) {
+  return e <= 0 ? `~${Math.round(-e).toLocaleString()} m` : `${Math.round(e)} m (land)`;
+}
+function renderMousePos(lat, lon, depthText) {
+  document.getElementById('mousePos').textContent =
+    fmtLatLon(lat, lon) + (depthText ? ` · ${depthText}` : '');
+}
+// throttled depth fetch for a cell; updates the readout only if still relevant
+async function _fetchHoverDepth(key, lat, lon) {
+  if (_depthInflight) return;
+  _depthInflight = true; _lastFetchAt = Date.now();
+  try {
+    const r = await api(`/api/depth?lat=${lat}&lon=${lon}`);
+    _depthCache.set(key, r.elev_m);
+    if (_hoverKey === key) { _lastDepthText = _fmtDepth(r.elev_m); renderMousePos(lat, lon, _lastDepthText); }
+  } catch (err) {
+    if (_hoverKey === key) renderMousePos(lat, lon, _lastDepthText || 'depth n/a');
+  } finally { _depthInflight = false; }
+}
+map.on('mousemove', e => {
+  let lon = e.latlng.lng;            // normalize after world wrap
+  lon = ((lon + 180) % 360 + 360) % 360 - 180;
+  const lat = e.latlng.lat;
+  // hover depth: on whenever the Depth base is active OR "Depth on hover" is ticked
+  const depthOn = document.getElementById('baseMap').value === 'depth'
+               || document.getElementById('chkDepthHover').checked;
+  if (!depthOn) { renderMousePos(lat, lon); return; }
+
+  const key = _depthKey(lat, lon);
+  _hoverKey = key;
+  if (_depthCache.has(key)) {                     // instant: already known cell
+    _lastDepthText = _fmtDepth(_depthCache.get(key));
+    renderMousePos(lat, lon, _lastDepthText);
+    return;
+  }
+  // unknown cell: show coords + last depth while we fetch the new one
+  renderMousePos(lat, lon, _lastDepthText || '…');
+  clearTimeout(_depthTimer);
+  const since = Date.now() - _lastFetchAt;
+  const wait = Math.max(0, 500 - since);          // throttle to ~2/s, respects free API
+  _depthTimer = setTimeout(() => {
+    if (_hoverKey === key) _fetchHoverDepth(key, lat, lon);
+  }, wait);
+});
+map.on('mouseout', () => { document.getElementById('mousePos').textContent = '—'; });
+
+const markersLayer = L.layerGroup().addTo(map);
+const linesLayer   = L.layerGroup().addTo(map);
+const vesselLayer  = L.layerGroup().addTo(map);   // auto-tracked vessel markers
+const vesselTrack  = L.layerGroup().addTo(map);   // plotted origin->dest track
+let seamapLayer = null, networkLayer = null, landLayer = null, chartsLayer = null, utmLayer = null;
+
+const canvasRenderer = L.canvas({ padding: 0.4 });   // fast renderer for the big grid
+
+const LINE_STYLES = {
+  raw_solid:    { color: '#2196F3', weight: 3, opacity: 0.8 },
+  opt_solid:    { color: '#4CAF50', weight: 4, opacity: 0.9 },
+  opt_dashed:   { color: '#4CAF50', weight: 3, opacity: 0.9, dashArray: '6,6' },  // port-to-grid connection
+  opt_warn:     { color: '#FFB300', weight: 5, opacity: 0.85 },  // stretch still touching land (validation)
+  opt_near:     { color: '#F9A825', weight: 6, opacity: 0.9, dashArray: '1,9', lineCap: 'round' },  // closer than the near-miss limit (validation)
+  raw_ghost:    { color: 'gray',    weight: 2, opacity: 0.5, dashArray: '5,5' },
+  pilot_dashed: { color: 'orange',  weight: 3, opacity: 0.9, dashArray: '5,5' },
+  vessel_dash:  { color: 'black',   weight: 2, opacity: 0.8, dashArray: '4,8' }
+};
+
+// ================================================================ utils
+function apiFetch(path, init) {
+  return LITE ? window.LiteBackend.fetch(path, init) : fetch(path, init);
+}
+async function api(path, opts) {
+  let init = opts;
+  if (opts) {
+    // FormData must set its own multipart Content-Type (it carries the boundary).
+    init = (opts.body instanceof FormData)
+      ? opts
+      : Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts);
+  }
+  const r = await apiFetch(path, init);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+  return data;
+}
+function toast(msg, ms = 4000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
+}
+// Escape text before it goes into innerHTML or an attribute. Port and vessel
+// names are free text: a name containing " or & used to break the library
+// table and the vessel popups.
+const _ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => _ESC[c]); }
+
+function openModal(id)  { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+document.querySelectorAll('.modal-bg').forEach(m =>
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); }));
+
+// coordinate display format: per browser (Settings) - dd / ddm / dms
+function coordFmt() {
+  try { return localStorage.getItem('coordFmt') || 'dd'; } catch (e) { return 'dd'; }
+}
+function fmtCoord(v, isLat, fmt = coordFmt()) {
+  if (fmt === 'dd') return v.toFixed(5);
+  const hemi = isLat ? (v >= 0 ? 'N' : 'S') : (v >= 0 ? 'E' : 'W');
+  const a = Math.abs(v), w = isLat ? 2 : 3;
+  let d = Math.floor(a), m = (a - d) * 60;
+  if (fmt === 'ddm') {
+    if (+m.toFixed(3) >= 60) { d += 1; m = 0; }
+    return `${String(d).padStart(w, '0')}°${m.toFixed(3).padStart(6, '0')}'${hemi}`;
+  }
+  let mi = Math.floor(m), sec = (m - mi) * 60;
+  if (+sec.toFixed(1) >= 60) { sec = 0; mi += 1; }
+  if (mi >= 60) { mi = 0; d += 1; }
+  return `${String(d).padStart(w, '0')}°${String(mi).padStart(2, '0')}'${sec.toFixed(1).padStart(4, '0')}"${hemi}`;
+}
+function fmtLatLon(lat, lon) { return `${fmtCoord(lat, true)}, ${fmtCoord(lon, false)}`; }
+
+const DEFAULT_SPEED = 10;     // kn - used until a speed is set in Settings
+// typed speeds: accept "10,5" (Norwegian keyboards) as well as "10.5"
+function parseSpeed(v) {
+  const x = parseFloat(String(v ?? '').trim().replace(',', '.'));
+  return x > 0 && x <= 100 ? x : NaN;
+}
+
+function fmtDist(km) {
+  const nm = state.settings.unit_index === 0;
+  return (km * (nm ? 0.539957 : 1)).toLocaleString('en', { maximumFractionDigits: 0 }) + (nm ? ' NM' : ' km');
+}
+function legHours(km, speed) {
+  const sp = speed > 0 ? speed : (state.settings.speed || DEFAULT_SPEED);
+  return (km * 0.539957) / sp;
+}
+function fmtHours(h) {
+  return `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h ${Math.floor((h * 60) % 60)}m`;
+}
+// Duration of a set of legs at the itinerary's per-leg speeds. Raw and
+// optimized each use their OWN leg distances - both totals used to show the
+// time of whatever the itinerary currently listed (after optimizing, the
+// raw total showed the optimized time).
+function totalDurationHours(legKm) {
+  let h = 0;
+  legKm.forEach((km, i) => h += legHours(km, legSpeeds[i]));
+  return h;
+}
+function fmtTotal(km, legKm) {
+  if (!km) return '0';
+  const h = totalDurationHours(legKm);
+  return `${fmtDist(km)} | ${Math.floor(h / 24)}d ${Math.floor(h % 24)}h`;
+}
+
+// ================================================================ rendering
+function renderAll() { renderLibrary(); renderRoute(); renderMarkers(); renderLegend(); renderVessels(); }
+
+// -------- vessel position age --------
+function vesselAgeSeconds(v) {
+  if (v.updated_epoch) return Math.max(0, Date.now() / 1000 - v.updated_epoch);
+  if (v.updated) {                       // fallback: parse "YYYY-MM-DD HH:MM:SS ... UTC"
+    const t = Date.parse(v.updated.slice(0, 19).replace(' ', 'T') + 'Z');
+    if (!isNaN(t)) return Math.max(0, (Date.now() - t) / 1000);
+  }
+  return null;
+}
+function fmtAge(v) {
+  const s = vesselAgeSeconds(v);
+  if (s === null) return '';
+  if (s < 60) return `${Math.floor(s)}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function renderVessels() {
+  vesselLayer.clearLayers();
+  for (const [n, v] of Object.entries(state.vessels)) {
+    if (v.lat == null || v.lon == null) continue;
+    const age = fmtAge(v);
+    // Popup built as DOM, not an HTML string with an inline onclick: vessel
+    // names are free text and used to break out of the quoted handler.
+    const div = document.createElement('div');
+    div.innerHTML = `<b>${esc(n)}</b>${v.mmsi ? ' (MMSI ' + esc(v.mmsi) + ')' : ''}<br>` +
+                    `${(+v.lat).toFixed(4)}, ${(+v.lon).toFixed(4)}<br>` +
+                    `<i>Position: ${esc(age || 'unknown age')}</i>`;
+    if (v.dest) {
+      const b = document.createElement('button');
+      b.textContent = `Route & ETA → ${v.dest}`;
+      b.style.cssText = 'display:block;margin-top:5px;cursor:pointer';
+      b.onclick = () => etaForVessel(n);
+      div.append(document.createElement('br'), b);
+    }
+    addMarkerWorld([v.lat, v.lon], ll => L.marker(ll, { icon: L.divIcon({
+      html: '<div style="font-size:22px">🚢</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 12] })
+    }).bindPopup(div), vesselLayer);
+  }
+}
+
+// poll for live tracker updates AND colleagues' shared-data changes (SharePoint)
+setInterval(async () => {
+  try {
+    const s = await api('/api/state');
+    state.vessels = s.vessels;
+    renderVessels();
+    if (document.getElementById('mdlVessel').classList.contains('show')) renderVesselTable();
+    // did someone else change locations / pilot points / waypoints?
+    const before = JSON.stringify([state.locations, state.pilotage, state.temp_waypoints]);
+    const after = JSON.stringify([s.locations, s.pilotage, s.temp_waypoints]);
+    if (before !== after) {
+      state.locations = s.locations;
+      state.pilotage = s.pilotage;
+      state.temp_waypoints = s.temp_waypoints;
+      renderLibrary(); renderMarkers();
+      if (pilotPanelOpen()) renderPilotTable();
+    }
+  } catch (e) { /* server briefly unreachable - ignore */ }
+}, 20000);
+
+let worldSearchSeq = 0;
+function renderLibrary() {
+  const el = document.getElementById('libList'); el.innerHTML = '';
+  const q = (document.getElementById('libFilter').value || '').toLowerCase();
+  const all = Object.keys(state.locations).sort();
+  document.getElementById('libCount').textContent = all.length;
+  const shown = all.filter(n => n.toLowerCase().includes(q));
+  if (LITE) { renderLibraryLite(el, all, shown, q); return; }
+  if (shown.length === 0) {
+    el.innerHTML = '<div style="padding:10px;color:#98a3af;font-style:italic">' +
+      (all.length ? 'No ports match the filter' : 'Library is empty — use the Library button to add ports') + '</div>';
+    return;
+  }
+  shown.forEach(name => {
+    const div = document.createElement('div'); div.className = 'lib-item';
+    div.style.cursor = 'pointer'; div.title = 'Add to route';
+    const span = document.createElement('span'); span.textContent = name;
+    const btn = document.createElement('button'); btn.textContent = '+'; btn.title = 'Add to route';
+    div.onclick = () => { route.push(name); renderRoute(); };   // whole row adds
+    div.append(span, btn); el.appendChild(div);
+  });
+}
+
+// Lite: "My ports" (this browser) + matches from ~4 000 world ports. A
+// world port is copied into My ports when used, with its exact position,
+// so the route uses its land-free network connection (see build_lite.py).
+function renderLibraryLite(el, all, shown, q) {
+  const libRow = (name, onAdd, extra, world) => {
+    const div = document.createElement('div'); div.className = 'lib-item' + (world ? ' world' : '');
+    div.style.cursor = 'pointer'; div.title = 'Add to route';
+    const span = document.createElement('span'); span.textContent = name;
+    if (extra) { const sm = document.createElement('small'); sm.textContent = extra; span.appendChild(sm); }
+    const btn = document.createElement('button'); btn.textContent = '+'; btn.title = 'Add to route';
+    div.onclick = onAdd; div.append(span, btn); el.appendChild(div);
+  };
+  if (shown.length) {
+    const h = document.createElement('div'); h.className = 'lib-section'; h.textContent = 'My ports'; el.appendChild(h);
+    shown.forEach(name => libRow(name, () => { route.push(name); renderRoute(); }));
+  }
+  if (q.trim().length < 2) {
+    if (!shown.length) el.innerHTML = '<div style="padding:10px;color:#98a3af;font-style:italic">' +
+      'Type a port name above to search about 4,000 world ports, or right-click the map to add your own point.</div>';
+    return;
+  }
+  const seq = ++worldSearchSeq;
+  window.LiteBackend.searchPorts(q, 40).then(hits => {
+    if (seq !== worldSearchSeq) return;              // a newer keystroke won
+    hits = hits.filter(p => !(p.name in state.locations));
+    if (!hits.length) {
+      if (!shown.length) el.innerHTML = '<div style="padding:10px;color:#98a3af;font-style:italic">No ports match</div>';
+      return;
+    }
+    const h = document.createElement('div'); h.className = 'lib-section'; h.textContent = 'World ports'; el.appendChild(h);
+    hits.forEach(p => libRow(p.name, async () => {
+      try {
+        await api('/api/locations', { method: 'POST', body: JSON.stringify({ name: p.name, lat: p.lat, lon: p.lon }) });
+        await refreshState();
+        route.push(p.name); renderRoute();
+      } catch (e) { toast(e.message); }
+    }, p.country ? ' · ' + p.country : '', true));
+  }).catch(e => toast(e.message));
+}
+
+function renderRoute() {
+  const el = document.getElementById('routeList'); el.innerHTML = '';
+  document.getElementById('routeCount').textContent = route.length;
+  if (route.length === 0) {
+    el.innerHTML = '<div style="padding:10px;color:#98a3af;font-style:italic">Click ports in the library above to build a route</div>';
+    return;
+  }
+  route.forEach((name, i) => {
+    const div = document.createElement('div'); div.className = 'route-item'; div.dataset.idx = i;
+    const span = document.createElement('span'); span.textContent = `${i + 1}. ${name}`; span.title = name;
+    const btn = document.createElement('button'); btn.textContent = '✕'; btn.title = 'Remove';
+    btn.onclick = () => { route.splice(i, 1); renderRoute(); };
+    div.append(span, btn); el.appendChild(div);
+  });
+}
+new Sortable(document.getElementById('routeList'), {
+  animation: 120,
+  onEnd: e => {
+    const item = route.splice(e.oldIndex, 1)[0];
+    route.splice(e.newIndex, 0, item);
+    renderRoute();
+  }
+});
+
+const anchorIcon = L.divIcon({ html: '<div style="background:#2A81CB;border:2px solid #fff;border-radius:50%;width:14px;height:14px;box-shadow:0 0 4px rgba(0,0,0,.5)"></div>', className: '', iconSize: [14, 14], iconAnchor: [7, 7] });
+const wpIcon = L.divIcon({ html: '<div style="background:#aaa;border:2px solid #fff;border-radius:50%;width:12px;height:12px"></div>', className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
+
+const pilotIcon = L.divIcon({ html: '<div style="background:orange;border:2px solid #fff;border-radius:50%;width:12px;height:12px;box-shadow:0 0 3px rgba(0,0,0,.4);cursor:move"></div>', className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
+const pilotIconSel = L.divIcon({ html: '<div style="background:#E91E63;border:3px solid #fff;border-radius:50%;width:18px;height:18px;box-shadow:0 0 0 3px rgba(233,30,99,.4), 0 0 6px rgba(0,0,0,.5);cursor:move"></div>', className: '', iconSize: [18, 18], iconAnchor: [9, 9] });
+let pilotSelection = null;   // { port, idx } - shared between map and panel
+let pilotPlacing = false;    // "click the map to place a pilot point" mode
+// marker dragging is opt-in (persisted) - accidental drags silently moved points
+let pilotDragEnabled = localStorage.getItem('pilotDrag') === '1';
+function togglePilotDrag() {
+  pilotDragEnabled = document.getElementById('chkPilotDrag').checked;
+  localStorage.setItem('pilotDrag', pilotDragEnabled ? '1' : '0');
+  renderMarkers();
+  toast(pilotDragEnabled ? 'Pilot markers can now be dragged' : 'Pilot markers locked');
+}
+
+function pilotPanelOpen() { return document.getElementById('mdlPilot').classList.contains('show'); }
+
+function selectPilotPoint(port, idx, pan = false) {
+  pilotSelection = { port, idx };
+  const sel = document.getElementById('pilotPort');
+  if (sel.value !== port) sel.value = port;
+  renderPilotTable();
+  renderMarkers();
+  if (pan) {
+    const p = (state.pilotage[port] || [])[idx];
+    if (p) map.panTo(p);
+  }
+  const row = document.getElementById('pilotTableBody').children[idx];
+  if (row) row.scrollIntoView({ block: 'nearest' });
+}
+
+function renderMarkers() {
+  markersLayer.clearLayers();
+  for (const [n, c] of Object.entries(state.locations))
+    addMarkerWorld(c, ll => L.marker(ll, { icon: anchorIcon }).bindPopup(`<b>${esc(n)}</b>`), markersLayer);
+  for (const [n, c] of Object.entries(state.temp_waypoints)) addMarkerWorld(c, ll => {
+    const div = document.createElement('div');
+    div.innerHTML = `<b>${esc(n)}</b> (waypoint)<br>`;
+    const b = document.createElement('button');
+    b.textContent = 'Delete waypoint';
+    b.style.cssText = 'display:block;width:100%;margin-top:5px;cursor:pointer';
+    b.onclick = async () => {
+      try { await api('/api/waypoints/' + encodeURIComponent(n), { method: 'DELETE' }); }
+      catch (e) { toast(e.message); }
+      route = route.filter(x => x !== n); renderRoute();
+      map.closePopup(); await refreshState();
+    };
+    div.appendChild(b);
+    return L.marker(ll, { icon: wpIcon }).bindPopup(div);
+  }, markersLayer);
+  for (const [port, pts] of Object.entries(state.pilotage))
+    if (port in state.locations)
+      pts.forEach((pt, idx) => addPilotMarker(port, idx, pt));
+}
+
+// pilot point marker; popup when panel closed, row-select when open;
+// draggable only when the toggle in the Pilot Point Manager is on
+function addPilotMarker(port, idx, pt) {
+  for (const off of WORLD) addPilotMarkerAt(port, idx, [pt[0], pt[1] + off]);
+}
+function addPilotMarkerAt(port, idx, pt) {
+  const isSel = pilotSelection && pilotSelection.port === port && pilotSelection.idx === idx;
+  const m = L.marker(pt, { icon: isSel ? pilotIconSel : pilotIcon,
+                           draggable: pilotDragEnabled }).addTo(markersLayer);
+
+  if (pilotPanelOpen()) {
+    // two-way highlight: clicking the marker selects its row in the panel
+    m.on('click', () => selectPilotPoint(port, idx));
+  } else {
+    const hint = pilotDragEnabled ? 'Drag the marker to reposition'
+                                  : 'Dragging is locked — enable it in the Pilot Point Manager';
+    const div = document.createElement('div');
+    div.innerHTML = `<b>Pilot point ${idx + 1}</b> — ${esc(port)}<br><small>${hint}</small><br>`;
+    const sel = document.createElement('select');
+    sel.style.cssText = 'width:100%;margin-top:5px';
+    Object.keys(state.locations).sort().forEach(n => {
+      const o = document.createElement('option'); o.textContent = n; o.selected = (n === port);
+      sel.appendChild(o);
+    });
+    const btnMove = document.createElement('button');
+    btnMove.textContent = 'Move to selected port'; btnMove.style.cssText = 'display:block;width:100%;margin-top:5px';
+    btnMove.onclick = () => movePilotPoint(port, idx, sel.value);
+    const btnDel = document.createElement('button');
+    btnDel.textContent = 'Delete point'; btnDel.style.cssText = 'display:block;width:100%;margin-top:5px';
+    btnDel.onclick = () => deletePilotPoint(port, idx);
+    div.append(sel, btnMove, btnDel);
+    m.bindPopup(div);
+  }
+
+  m.on('dragend', async () => {
+    const ll = m.getLatLng();
+    const pts = (state.pilotage[port] || []).map(p => [...p]);
+    pts[idx] = [ll.lat, wrapLon(ll.lng)];
+    try { await api('/api/pilotage', { method: 'POST', body: JSON.stringify({ port, points: pts }) }); }
+    catch (e) { toast(e.message); }
+    await refreshState();
+    if (pilotPanelOpen()) selectPilotPoint(port, idx);   // keep highlight + live table values
+  });
+}
+
+async function movePilotPoint(fromPort, idx, toPort) {
+  if (toPort === fromPort) { map.closePopup(); return; }
+  const fromPts = (state.pilotage[fromPort] || []).map(p => [...p]);
+  const moved = fromPts.splice(idx, 1)[0];
+  if (!moved) return;
+  const toPts = (state.pilotage[toPort] || []).map(p => [...p]);
+  toPts.push(moved);
+  try {
+    await api('/api/pilotage', { method: 'POST', body: JSON.stringify({ port: fromPort, points: fromPts }) });
+    await api('/api/pilotage', { method: 'POST', body: JSON.stringify({ port: toPort, points: toPts }) });
+    toast(`Pilot point moved to ${toPort}`);
+  } catch (e) { toast(e.message); }
+  pilotSelection = null;
+  map.closePopup(); await refreshState();
+  if (pilotPanelOpen()) renderPilotTable();
+}
+
+async function deletePilotPoint(port, idx) {
+  const pts = (state.pilotage[port] || []).map(p => [...p]);
+  pts.splice(idx, 1);
+  try { await api('/api/pilotage', { method: 'POST', body: JSON.stringify({ port, points: pts }) }); }
+  catch (e) { toast(e.message); }
+  pilotSelection = null;
+  map.closePopup(); await refreshState();
+  if (pilotPanelOpen()) renderPilotTable();
+}
+
+function renderLegend() {
+  document.getElementById('legend').style.display =
+    state.settings.show_legend !== false ? 'block' : 'none';
+}
+
+let lastLines = [];           // what drawLines last drew - Save Route exports it
+function drawLines(lines) {
+  lastLines = lines || [];
+  refreshGlobe();
+  linesLayer.clearLayers();
+  (lines || []).forEach(([coords, style]) => {
+    const opts = LINE_STYLES[style] || LINE_STYLES.raw_ghost;
+    const copies = addLineWorld(coords, opts, linesLayer);
+    if (style === 'raw_solid' || style === 'opt_solid') copies.forEach(pl => addArrows(pl, opts.color));
+  });
+}
+
+// direction arrows: positioned by interpolating in PROJECTED space, so they
+// sit exactly on the drawn line, with the glyph flex-centered on its anchor
+function addArrows(polyline, color) {
+  const pts = polyline.getLatLngs();
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += pts[i - 1].distanceTo(pts[i]);
+  if (total < 50000) return;
+  const Z = 10;   // fixed projection zoom (Mercator is conformal - angle is zoom-independent)
+  const n = Math.min(8, Math.max(1, Math.floor(total / 400000)));
+  for (let k = 1; k <= n; k++) {
+    const target = (total * k) / (n + 1);
+    let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const seg = pts[i - 1].distanceTo(pts[i]);
+      if (acc + seg >= target) {
+        const f = (target - acc) / seg;
+        const a = map.project(pts[i - 1], Z), b = map.project(pts[i], Z);
+        const q = a.add(b.subtract(a).multiplyBy(f));     // point ON the drawn line
+        const latlng = map.unproject(q, Z);
+        // screen angle of travel: 0deg = up (north), y axis grows downward
+        const ang = Math.atan2(b.x - a.x, a.y - b.y) * 180 / Math.PI;
+        L.marker(latlng, { icon: L.divIcon({
+          html: `<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;` +
+                `line-height:1;transform:rotate(${ang}deg);color:${color};font-size:13px;font-weight:bold">▲</div>`,
+          className: '', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false
+        }).addTo(linesLayer);
+        break;
+      }
+      acc += seg;
+    }
+  }
+}
+
+// ================================================================ route calc
+function setItinerary(rows) {
+  lastRows = rows;
+  // keep existing per-leg speeds where they line up, default to global speed
+  legSpeeds = rows.map((r, i) => legSpeeds[i] > 0 ? legSpeeds[i] : (state.settings.speed || DEFAULT_SPEED));
+  const tb = document.querySelector('#itinerary tbody'); tb.innerHTML = '';
+  rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    const clr = (r.min_clear_nm != null) ? `Closest approach to land (outside the port approaches): ${r.min_clear_nm.toFixed(2)} nm` : '';
+    const warn = r.land_warn
+      ? ` <span class="landWarn" title="A short stretch of this leg still touches the coastline (shown in amber on the map). Pilot points can guide it clear.${clr ? '\n' + clr : ''}">&#9679;</span>`
+      : r.near_miss
+      ? ` <span class="nearWarn" title="This leg passes within ${nearMissNm} nm of the coastline (dotted on the map) - check it against the chart.${clr ? '\n' + clr : ''}">&#9675;</span>`
+      : '';
+    const distTitle = fmtDist(r.dist_km) + (clr ? ' - ' + clr : '');
+    tr.innerHTML = `<td title="${esc(r.start)}">${esc(r.start)}</td><td title="${esc(r.end)}">${esc(r.end)}</td>
+      <td class="num" title="${distTitle}">${fmtDist(r.dist_km)}${warn}</td>
+      <td><input type="text" inputmode="decimal" class="spd-input" value="${legSpeeds[i]}" title="Speed in knots - type a value"></td>
+      <td class="durCell" title="${fmtHours(legHours(r.dist_km, legSpeeds[i]))}">${fmtHours(legHours(r.dist_km, legSpeeds[i]))}</td>`;
+    const inp = tr.querySelector('input');
+    inp.addEventListener('focus', () => inp.select());
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+    inp.addEventListener('input', () => {
+      const v = parseSpeed(inp.value);
+      inp.classList.toggle('bad', !(v > 0));
+      if (v > 0) {
+        legSpeeds[i] = v;
+        tr.querySelector('.durCell').textContent = fmtHours(legHours(r.dist_km, v));
+        updateTotals();
+      }
+    });
+    tb.appendChild(tr);
+  });
+}
+function updateTotals() {
+  document.getElementById('totalRaw').textContent = (LITE ? 'Route: ' : 'Raw: ') + fmtTotal(totalRawKm, rawLegKm);
+  document.getElementById('totalOpt').textContent = 'Optimized: ' + fmtTotal(totalOptKm, optLegKm);
+}
+
+async function calculateRaw() {
+  if (route.length < 2) { toast('Add at least 2 points to the route'); return; }
+  const btn = document.getElementById('btnCalc'); btn.disabled = true;
+  document.getElementById('statusBar').textContent = 'Calculating raw route...';
+  try {
+    const r = await api('/api/route/calculate', { method: 'POST', body: JSON.stringify({ names: route }) });
+    legsCache = r.legs; legsCacheKey = route.join('|'); totalRawKm = r.total_km; totalOptKm = 0;
+    rawLegKm = r.legs.map(l => l.dist_km); optLegKm = [];
+    drawLines(r.lines); setItinerary(r.legs); updateTotals();
+    document.getElementById('statusBar').textContent = '';
+  } catch (e) { toast(e.message); document.getElementById('statusBar').textContent = ''; }
+  btn.disabled = false;
+}
+
+async function runOptimizer() {
+  if (route.length < 2) { toast('Add at least 2 points to the route'); return; }
+  // recalculate if the route changed in ANY way since the last CALCULATE -
+  // optimizing stale legs drew routes between the wrong ports
+  if (!legsCache || legsCacheKey !== route.join('|')) await calculateRaw();
+  if (!legsCache || legsCacheKey !== route.join('|')) return;
+  const btn = document.getElementById('btnOpt'); btn.disabled = true;
+  document.getElementById('statusBar').textContent = 'Optimizing route (vector search)... this can take a moment';
+  try {
+    const r = await api('/api/route/optimize', { method: 'POST',
+      body: JSON.stringify({ names: route, legs: legsCache }) });
+    totalOptKm = r.total_km;
+    optLegKm = r.rows.map(x => x.dist_km);
+    if (r.near_miss_nm) nearMissNm = r.near_miss_nm;
+    drawLines(r.lines); setItinerary(r.rows); updateTotals();
+    const nWarn = (r.rows || []).reduce((s, x) => s + (x.land_warn || 0), 0);
+    const nNear = (r.rows || []).reduce((s, x) => s + (x.near_miss || 0), 0);
+    document.getElementById('statusBar').textContent = nWarn
+      ? 'Done. A few short stretches (amber) still touch the coastline - pilot points can guide them clear.'
+      : nNear
+      ? `Done. Some stretches (dotted) pass within ${nearMissNm} nm of the coastline - check them against the chart.`
+      : '';
+  } catch (e) { toast(e.message); document.getElementById('statusBar').textContent = ''; }
+  btn.disabled = false;
+}
+
+// ================================================================ overlays
+function toggleSeamap() {
+  if (document.getElementById('chkSeamap').checked) {
+    seamapLayer = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',
+      { attribution: 'OpenSeaMap', maxZoom: 18 });
+    warnOnTileError(seamapLayer, 'OpenSeaMap');
+    seamapLayer.setZIndex(5).addTo(map);
+    // a transparent overlay of buoys, lights and marks: nothing to see zoomed out
+    if (map.getZoom() < 9) toast('OpenSeaMap shows seamarks (buoys, lights, beacons) from about zoom 9 - zoom in to see them.', 6000);
+  } else if (seamapLayer) { map.removeLayer(seamapLayer); seamapLayer = null; }
+}
+
+// Kartverket Norwegian nautical charts (transparent overlay; Norway only,
+// blank elsewhere so it layers over any base) - needs internet
+function toggleCharts() {
+  if (document.getElementById('chkCharts').checked) {
+    if (!chartsLayer) {
+      chartsLayer = L.tileLayer.wms('https://wms.geonorge.no/skwms1/wms.sjokartraster2?', {
+        layers: 'all', format: 'image/png', version: '1.3.0',
+        transparent: true, maxZoom: 18, attribution: 'Kartverket sjøkart'
+      });
+      chartsLayer.setZIndex(4);
+      chartsLayer.on('tileerror', () => {
+        toast('Chart tiles unavailable (needs internet / Kartverket reachable)');
+      });
+    }
+    chartsLayer.addTo(map);
+  } else if (chartsLayer) { map.removeLayer(chartsLayer); }
+}
+
+// UTM zone grid - generated locally (no internet): 6deg meridians + 8deg
+// latitude bands (C..X), with the Norway/Svalbard special cases noted.
+function buildUtmLayer() {
+  const g = L.layerGroup();
+  const lineStyle = { color: '#8e24aa', weight: 1, opacity: 0.6, interactive: false };
+  // vertical zone boundaries every 6deg
+  for (let z = 0; z <= 60; z++) {
+    const lon = -180 + z * 6;
+    L.polyline([[-80, lon], [84, lon]], lineStyle).addTo(g);
+  }
+  // horizontal band boundaries every 8deg from 80S to 72N, then 84N
+  const bandLats = [];
+  for (let lat = -80; lat < 72; lat += 8) bandLats.push(lat);
+  bandLats.push(72); bandLats.push(84);
+  bandLats.forEach(lat => L.polyline([[lat, -180], [lat, 180]], lineStyle).addTo(g));
+  // labels: zone number + band letter at each cell centre (skip polar I/O letters)
+  const letters = "CDEFGHJKLMNPQRSTUVWX";   // 20 bands, 8deg each (X is 12deg)
+  for (let z = 1; z <= 60; z++) {
+    const lonC = -180 + (z - 0.5) * 6;
+    for (let bi = 0; bi < letters.length; bi++) {
+      const latLo = -80 + bi * 8;
+      const latC = (letters[bi] === 'X') ? 78 : latLo + 4;
+      L.marker([latC, lonC], { interactive: false, icon: L.divIcon({
+        className: '', iconSize: [34, 14],
+        html: `<div style="font-size:10px;color:#8e24aa;font-weight:600;opacity:.75;` +
+              `text-align:center;text-shadow:0 0 2px #fff">${z}${letters[bi]}</div>`
+      }) }).addTo(g);
+    }
+  }
+  return g;
+}
+function toggleUtm() {
+  if (document.getElementById('chkUtm').checked) {
+    if (!utmLayer) utmLayer = buildUtmLayer();
+    utmLayer.addTo(map);
+  } else if (utmLayer) { map.removeLayer(utmLayer); }
+}
+async function toggleNetwork() {
+  const chk = document.getElementById('chkNetwork');
+  if (chk.checked) {
+    if (!networkLayer) {
+      document.getElementById('statusBar').textContent = 'Loading routing network...';
+      try {
+        const gj = await api('/api/network');
+        networkLayer = L.geoJSON(gj, { style: { color: 'red', weight: 0.5, opacity: 0.3 },
+                                       renderer: canvasRenderer, smoothFactor: 2 });
+      } catch (e) { toast(e.message); chk.checked = false;
+        document.getElementById('statusBar').textContent = ''; return; }
+      document.getElementById('statusBar').textContent = '';
+    }
+    networkLayer.addTo(map);
+  } else if (networkLayer) map.removeLayer(networkLayer);
+}
+async function toggleLand() {
+  const chk = document.getElementById('chkLand');
+  if (chk.checked) {
+    if (!landLayer) {
+      document.getElementById('statusBar').textContent = 'Loading land overlay...';
+      try {
+        const gj = await api('/api/land');
+        landLayer = L.geoJSON(gj, { style: { color: 'green', weight: 1, fillOpacity: 0.3 },
+                                    renderer: canvasRenderer });
+      } catch (e) { toast(e.message); chk.checked = false;
+        document.getElementById('statusBar').textContent = ''; return; }
+      document.getElementById('statusBar').textContent = '';
+    }
+    landLayer.addTo(map);
+  } else if (landLayer) map.removeLayer(landLayer);
+}
+
+// ================================================================ measure tool
+let measureMode = false, measureDone = false;
+let measurePts = [];
+const measureLayer = L.layerGroup().addTo(map);
+let measureRubber = null;
+
+function toggleMeasure() {
+  measureMode = !measureMode;
+  const btn = document.getElementById('btnMeasure');
+  btn.style.background = measureMode ? '#9C27B0' : '';
+  map.getContainer().style.cursor = measureMode ? 'crosshair' : '';
+  document.getElementById('measureInfo').style.display = measureMode ? 'block' : 'none';
+  if (measureMode) {
+    map.doubleClickZoom.disable();
+    measureReset();
+  } else {
+    map.doubleClickZoom.enable();
+    measureReset();
+  }
+}
+function measureReset() {
+  measurePts = []; measureDone = false;
+  measureLayer.clearLayers();
+  if (measureRubber) { map.removeLayer(measureRubber); measureRubber = null; }
+  updateMeasureInfo();
+}
+function gcBearing(a, b) {   // initial great-circle bearing, degrees true
+  const la1 = a.lat * Math.PI / 180, la2 = b.lat * Math.PI / 180;
+  const dLon = (b.lng - a.lng) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(la2);
+  const x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function measureTotalM() {
+  let t = 0;
+  for (let i = 1; i < measurePts.length; i++) t += measurePts[i - 1].distanceTo(measurePts[i]);
+  return t;
+}
+function updateMeasureInfo(cursorLatLng) {
+  const el = document.getElementById('measureInfo');
+  if (!measureMode) return;
+  let html = '<b>Measure</b><br>';
+  if (measurePts.length === 0) {
+    html += '<span class="mi-hint">Click the map to place points.</span><br>';
+  } else {
+    const total = measureTotalM();
+    html += `Points: ${measurePts.length} &nbsp; Total: <b>${fmtDist(total / 1000)}</b><br>`;
+    if (measurePts.length >= 2) {
+      const a = measurePts[measurePts.length - 2], b = measurePts[measurePts.length - 1];
+      html += `Last leg: ${fmtDist(a.distanceTo(b) / 1000)} @ ${gcBearing(a, b).toFixed(0)}°<br>`;
+    }
+    if (cursorLatLng && !measureDone) {
+      const last = measurePts[measurePts.length - 1];
+      const d = last.distanceTo(cursorLatLng);
+      html += `<span style="color:#9C27B0">→ cursor: ${fmtDist(d / 1000)} @ ${gcBearing(last, cursorLatLng).toFixed(0)}°</span><br>`;
+      html += `<span style="color:#9C27B0">grand total: ${fmtDist((measureTotalM() + d) / 1000)}</span><br>`;
+    }
+    if (measureDone) html += '<span class="mi-hint">Finished — click the map to start a new one.</span><br>';
+  }
+  html += '<span class="mi-hint">Right-click: undo point · Double-click: finish · Esc: exit</span>';
+  html += `<div class="mi-btns">
+    <button onclick="measureUndo()">↩ Undo</button>
+    <button onclick="measureFinish()">✔ Finish</button>
+    <button onclick="measureReset()">Clear</button>
+    <button onclick="toggleMeasure()">✕ Exit</button></div>`;
+  el.innerHTML = html;
+}
+
+function measureUndo() {
+  if (measurePts.length === 0) return;
+  measurePts.pop();
+  measureDone = false;
+  if (measurePts.length === 0 && measureRubber) { map.removeLayer(measureRubber); measureRubber = null; }
+  redrawMeasure();
+}
+function redrawMeasure() {
+  measureLayer.clearLayers();
+  if (measurePts.length === 0) return;
+  L.polyline(measurePts, { color: '#9C27B0', weight: 2, dashArray: '6,4' }).addTo(measureLayer);
+  measurePts.forEach((p, i) => {
+    L.circleMarker(p, { radius: 4, color: '#9C27B0', fillColor: '#fff', fill: true, fillOpacity: 1 })
+      .addTo(measureLayer);
+    if (i > 0) {   // segment label at midpoint (projected space, so it sits on the line)
+      const a = map.project(measurePts[i - 1]), b = map.project(p);
+      const mid = map.unproject(a.add(b).divideBy(2));
+      const dist = measurePts[i - 1].distanceTo(p);
+      L.tooltip({ permanent: true, direction: 'center', className: 'measure-label' })
+        .setLatLng(mid).setContent(`${fmtDist(dist / 1000)} @ ${gcBearing(measurePts[i - 1], p).toFixed(0)}°`)
+        .addTo(measureLayer);
+    }
+  });
+  updateMeasureInfo();
+}
+function measureFinish() {
+  if (measurePts.length === 0) return;
+  measureDone = true;
+  if (measureRubber) { map.removeLayer(measureRubber); measureRubber = null; }
+  redrawMeasure();
+}
+// own double-click detection (two quick clicks close together) -
+// Leaflet's dblclick event is unreliable with doubleClickZoom disabled
+let _mLastT = 0, _mLastPx = null;
+map.on('click', e => {
+  if (!measureMode) return;
+  const now = Date.now();
+  const px = map.latLngToContainerPoint(e.latlng);
+  if (_mLastPx && (now - _mLastT) < 450 && px.distanceTo(_mLastPx) < 12) {
+    _mLastT = 0; _mLastPx = null;
+    measureFinish();                        // second click of a double-click: finish, add nothing
+    return;
+  }
+  _mLastT = now; _mLastPx = px;
+  if (measureDone) measureReset();          // start a fresh measurement
+  measurePts.push(e.latlng);
+  redrawMeasure();
+});
+map.on('dblclick', e => {
+  if (measureMode) measureFinish();         // belt-and-braces if the event does fire
+});
+map.on('mousemove', e => {
+  if (!measureMode || measureDone || measurePts.length === 0) return;
+  const last = measurePts[measurePts.length - 1];
+  if (measureRubber) measureRubber.setLatLngs([last, e.latlng]);
+  else measureRubber = L.polyline([last, e.latlng],
+    { color: '#9C27B0', weight: 1.5, dashArray: '2,6', interactive: false }).addTo(map);
+  updateMeasureInfo(e.latlng);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (pilotPlacing) { pilotPlaceCancel(); return; }
+  if (locPicking) { locPickCancel(); return; }
+  if (measureMode) toggleMeasure();
+});
+
+// ================================================================ right-click
+map.on('contextmenu', e => {
+  if (pilotPlacing) { pilotPlaceCancel(); return; }   // right-click cancels placement
+  if (locPicking) { locPickCancel(); return; }        // right-click cancels location pick
+  if (measureMode) {
+    // right-click while measuring = undo last point; nothing to undo = exit
+    if (measurePts.length > 0 && !measureDone) measureUndo();
+    else toggleMeasure();
+    return;
+  }
+  const lat = e.latlng.lat, lng = wrapLon(e.latlng.lng);   // a click on a world copy
+  // closest port preselect
+  let closest = null, minD = Infinity;
+  for (const [n, c] of Object.entries(state.locations)) {
+    const d = Math.hypot(lat - c[0], lng - c[1]);
+    if (d < minD) { minD = d; closest = n; }
+  }
+  const ports = Object.keys(state.locations).sort()
+    .map(n => `<option ${n === closest ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const html = `
+    <b>${lat.toFixed(4)}, ${lng.toFixed(4)}</b>
+    <div id="ctxDepth" class="exe-only" style="color:#1565c0;font-size:12px;margin-top:3px">Depth: …</div>
+    <select id="ctxPort">${ports}</select>
+    <button onclick="ctxAddPilot(${lat},${lng})">Add Pilotage Point</button>
+    <input type="text" id="ctxWpName" placeholder="Waypoint name (optional → Temp 1, 2...)">
+    <button onclick="ctxAddWaypoint(${lat},${lng})">Add Route Waypoint</button>
+    <button onclick="navigator.clipboard.writeText('${lat.toFixed(6)}, ${lng.toFixed(6)}');map.closePopup();">Copy Coordinates</button>`;
+  L.popup({ className: 'ctx-popup' }).setLatLng(e.latlng).setContent(html).openOn(map);
+  fetchDepthInto('ctxDepth', lat, lng);
+});
+
+// GEBCO seabed depth into a popup element (server-side query, no CORS)
+async function fetchDepthInto(elId, lat, lon) {
+  try {
+    const r = await api(`/api/depth?lat=${lat}&lon=${lon}`);
+    const el = document.getElementById(elId);
+    if (!el) return;   // popup closed before the fetch returned
+    const e = r.elev_m;
+    el.textContent = e <= 0 ? `Depth: ${Math.round(-e).toLocaleString()} m`
+                            : `Elevation: ${Math.round(e).toLocaleString()} m (land)`;
+  } catch (err) {
+    const el = document.getElementById(elId);
+    if (el) el.textContent = 'Depth: unavailable';
+  }
+}
+async function ctxAddPilot(lat, lng) {
+  const port = document.getElementById('ctxPort').value;
+  if (!port) { toast('No port selected'); return; }
+  try {
+    await api('/api/pilotage/add', { method: 'POST', body: JSON.stringify({ port, lat, lon: lng }) });
+    await refreshState(); map.closePopup(); toast(`Pilot point added to ${port}`);
+  } catch (e) { toast(e.message); }
+}
+async function ctxAddWaypoint(lat, lng) {
+  const name = document.getElementById('ctxWpName').value.trim();  // empty -> server auto-names Temp N
+  try {
+    const r = await api('/api/waypoints', { method: 'POST', body: JSON.stringify({ name, lat, lon: lng }) });
+    await refreshState(); route.push(r.name); renderRoute(); map.closePopup();
+  } catch (e) { toast(e.message); }
+}
+
+// ================================================================ settings
+function openSettings() {
+  document.getElementById('setUnit').value = state.settings.unit_index ?? 0;
+  document.getElementById('setSpeed').value = state.settings.speed ?? DEFAULT_SPEED;
+  // map legacy Natural Earth setting names to the new GSHHG ones
+  const resMap = { 'Low (110m)': 'Intermediate (fast)', 'Medium (50m)': 'High (recommended)',
+                   'High (10m)': 'Full (max detail)' };
+  const res = state.settings.land_res ?? 'High (recommended)';
+  document.getElementById('setRes').value = resMap[res] || res;
+  document.getElementById('setLegend').checked = state.settings.show_legend !== false;
+  document.getElementById('setAisKey').value = state.settings.aisstream_api_key ?? '';
+  document.getElementById('setCoordFmt').value = coordFmt();
+  openModal('mdlSettings');
+}
+async function saveSettings() {
+  try {
+    const r = await api('/api/settings', { method: 'POST', body: JSON.stringify({
+      unit_index: parseInt(document.getElementById('setUnit').value),
+      speed: parseSpeed(document.getElementById('setSpeed').value) || DEFAULT_SPEED,
+      land_res: document.getElementById('setRes').value,
+      show_legend: document.getElementById('setLegend').checked,
+      aisstream_api_key: document.getElementById('setAisKey').value.trim()
+    })});
+    state.settings = r.settings;
+    try { localStorage.setItem('coordFmt', document.getElementById('setCoordFmt').value); } catch (e) {}
+    // land resolution may have changed: drop cached layer
+    if (landLayer) { map.removeLayer(landLayer); landLayer = null; }
+    document.getElementById('chkLand').checked = false;
+    renderLegend(); updateTotals(); closeModal('mdlSettings');
+  } catch (e) { toast(e.message); }
+}
+
+// ================================================================ library modal
+function renderLibTable() {
+  const tb = document.getElementById('libTableBody'); tb.innerHTML = '';
+  Object.keys(state.locations).sort().forEach(name => {
+    const [lat, lon] = state.locations[name];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><input value="${esc(name)}"></td><td><input value="${lat}"></td>
+                    <td><input value="${lon}"></td>
+                    <td><button class="btn-danger" style="padding:2px 8px">✕</button></td>`;
+    const [iName, iLat, iLon] = tr.querySelectorAll('input');
+    const save = async () => {
+      try {
+        await api('/api/locations', { method: 'POST', body: JSON.stringify({
+          old_name: name, name: iName.value.trim(),
+          lat: iLat.value, lon: iLon.value }) });
+        await refreshState(); renderLibTable();
+      } catch (e) { toast(e.message); renderLibTable(); }
+    };
+    [iName, iLat, iLon].forEach(i => i.addEventListener('change', save));
+    tr.querySelector('button').onclick = async () => {
+      await api('/api/locations/' + encodeURIComponent(name), { method: 'DELETE' });
+      await refreshState(); renderLibTable();
+    };
+    tb.appendChild(tr);
+  });
+}
+async function addLocation() {
+  try {
+    await api('/api/locations', { method: 'POST', body: JSON.stringify({
+      name: document.getElementById('newLocName').value.trim(),
+      lat: document.getElementById('newLocLat').value,
+      lon: document.getElementById('newLocLon').value }) });
+    document.getElementById('newLocName').value = '';
+    document.getElementById('newLocLat').value = '';
+    document.getElementById('newLocLon').value = '';
+    await refreshState(); renderLibTable();
+  } catch (e) { toast(e.message); }
+}
+
+// ---- add a library location by clicking the map (no copy-pasting coords) ----
+let locPicking = false;
+function startLocPick() {
+  closeModal('mdlLibrary');                 // get the map back in view
+  if (measureMode) toggleMeasure();         // don't fight with the measure tool
+  locPicking = true;
+  map.getContainer().style.cursor = 'crosshair';
+  toast('Click the map at the new location (Esc or right-click to cancel)', 8000);
+}
+function locPickCancel() {
+  locPicking = false;
+  map.getContainer().style.cursor = measureMode ? 'crosshair' : '';
+  openModal('mdlLibrary'); renderLibTable();
+}
+map.on('click', e => {
+  if (!locPicking) return;
+  locPicking = false;
+  map.getContainer().style.cursor = '';
+  const lat = e.latlng.lat, lon = ((e.latlng.lng + 180) % 360 + 360) % 360 - 180;
+  const div = document.createElement('div');
+  div.innerHTML = `<b>New location</b><br><small>${lat.toFixed(5)}, ${lon.toFixed(5)}</small>`;
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.placeholder = 'Name';
+  inp.value = document.getElementById('newLocName').value.trim();   // reuse a pre-typed name
+  const btn = document.createElement('button');
+  btn.textContent = 'Add to library';
+  const submit = async () => {
+    const name = inp.value.trim();
+    if (!name) { toast('Give the location a name'); inp.focus(); return; }
+    try {
+      await api('/api/locations', { method: 'POST',
+        body: JSON.stringify({ name, lat, lon }) });
+      document.getElementById('newLocName').value = '';
+      map.closePopup(); await refreshState();
+      toast(`"${name}" added to the library`);
+      openModal('mdlLibrary'); renderLibTable();
+    } catch (err) { toast(err.message); }
+  };
+  btn.onclick = submit;
+  inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') submit(); });
+  div.append(inp, btn);
+  L.popup({ className: 'ctx-popup' }).setLatLng(e.latlng).setContent(div).openOn(map);
+  setTimeout(() => inp.focus(), 50);
+});
+
+// ================================================================ pilot manager
+function openPilotMgr() {
+  const sel = document.getElementById('pilotPort');
+  sel.innerHTML = Object.keys(state.locations).sort().map(n => `<option>${esc(n)}</option>`).join('');
+  document.getElementById('chkPilotDrag').checked = pilotDragEnabled;
+  pilotSelection = null;
+  document.getElementById('mdlPilot').classList.add('show');
+  renderPilotTable();
+  renderMarkers();   // rebind markers to select-on-click mode
+}
+function closePilotMgr() {
+  if (pilotPlacing) pilotPlaceCancel();
+  document.getElementById('mdlPilot').classList.remove('show');
+  pilotSelection = null;
+  renderMarkers();   // restore popups
+}
+
+// make the panel draggable by its header
+(function () {
+  const panel = document.getElementById('mdlPilot');
+  const header = document.getElementById('pilotHeader');
+  let drag = null;
+  header.addEventListener('pointerdown', e => {
+    if (e.target.classList.contains('close')) return;
+    const r = panel.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    header.setPointerCapture(e.pointerId);
+  });
+  header.addEventListener('pointermove', e => {
+    if (!drag) return;
+    panel.style.right = 'auto';
+    panel.style.left = Math.max(0, Math.min(window.innerWidth - 80, e.clientX - drag.dx)) + 'px';
+    panel.style.top = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - drag.dy)) + 'px';
+  });
+  header.addEventListener('pointerup', () => { drag = null; });
+})();
+function currentPilotPoints() {
+  const port = document.getElementById('pilotPort').value;
+  return { port, pts: (state.pilotage[port] || []).map(p => [...p]) };
+}
+function renderPilotTable() {
+  const { pts } = currentPilotPoints();
+  const tb = document.getElementById('pilotTableBody'); tb.innerHTML = '';
+  const port = document.getElementById('pilotPort').value;
+  pts.forEach((p, i) => {
+    const tr = document.createElement('tr'); tr.dataset.idx = i;
+    if (pilotSelection && pilotSelection.port === port && pilotSelection.idx === i)
+      tr.classList.add('prow-selected');
+    tr.innerHTML = `<td>${i + 1}</td><td><input value="${(+p[0]).toFixed(5)}"></td>
+                    <td><input value="${(+p[1]).toFixed(5)}"></td>
+                    <td></td>
+                    <td><button class="btn-danger" style="padding:2px 8px">✕</button></td>`;
+    // row click -> highlight + pan to the marker on the map
+    tr.addEventListener('click', () => selectPilotPoint(port, i, true));
+    const [iLat, iLon] = tr.querySelectorAll('input');
+    [iLat, iLon].forEach(inp => {
+      inp.addEventListener('click', e => e.stopPropagation());
+      inp.addEventListener('change', () => savePilot(i, iLat.value, iLon.value));
+    });
+    // "Belongs to" port selector - changing it moves the point to another port
+    const sel = document.createElement('select');
+    Object.keys(state.locations).sort().forEach(n => {
+      const o = document.createElement('option'); o.textContent = n; o.selected = (n === port);
+      sel.appendChild(o);
+    });
+    sel.addEventListener('click', e => e.stopPropagation());
+    sel.addEventListener('change', () => movePilotPoint(port, i, sel.value));
+    tr.children[3].appendChild(sel);
+    tr.querySelector('button').onclick = e => { e.stopPropagation(); pilotDelete(i); };
+    tb.appendChild(tr);
+  });
+}
+async function pushPilot(port, pts) {
+  await api('/api/pilotage', { method: 'POST', body: JSON.stringify({ port, points: pts }) });
+  await refreshState(); renderPilotTable();
+}
+async function savePilot(i, lat, lon) {
+  const { port, pts } = currentPilotPoints();
+  pts[i] = [parseFloat(lat), parseFloat(lon)];
+  if (pts[i].some(isNaN)) { renderPilotTable(); return; }
+  try { await pushPilot(port, pts); } catch (e) { toast(e.message); }
+}
+function pilotAdd() {
+  // arm click-to-place mode: panel greys out, next map click places the point
+  const port = document.getElementById('pilotPort').value;
+  if (!port) return;
+  if (measureMode) toggleMeasure();   // don't fight with the measure tool
+  pilotPlacing = true;
+  const body = document.getElementById('pilotBody');
+  body.style.opacity = '0.45'; body.style.pointerEvents = 'none';
+  map.getContainer().style.cursor = 'crosshair';
+  toast(`Click the map to place a pilot point for ${port} (Esc to cancel)`, 8000);
+}
+function pilotPlaceCancel() {
+  pilotPlacing = false;
+  const body = document.getElementById('pilotBody');
+  body.style.opacity = ''; body.style.pointerEvents = '';
+  map.getContainer().style.cursor = measureMode ? 'crosshair' : '';
+}
+map.on('click', async e => {
+  if (!pilotPlacing) return;
+  const port = document.getElementById('pilotPort').value;
+  pilotPlaceCancel();
+  try {
+    await api('/api/pilotage/add', { method: 'POST',
+      body: JSON.stringify({ port, lat: e.latlng.lat, lon: wrapLon(e.latlng.lng) }) });
+    await refreshState();
+    selectPilotPoint(port, (state.pilotage[port] || []).length - 1);
+    toast(`Pilot point added to ${port}`);
+  } catch (err) { toast(err.message); }
+});
+async function pilotDelete(i) {
+  const { port, pts } = currentPilotPoints(); pts.splice(i, 1);
+  try { await pushPilot(port, pts); } catch (e) { toast(e.message); }
+}
+async function pilotMove(d) {
+  const { port, pts } = currentPilotPoints();
+  if (!pilotSelection || pilotSelection.port !== port) { toast('Select a row first'); return; }
+  const i = pilotSelection.idx;
+  const j = i + d; if (j < 0 || j >= pts.length) return;
+  [pts[i], pts[j]] = [pts[j], pts[i]];
+  try { await pushPilot(port, pts); selectPilotPoint(port, j); } catch (e) { toast(e.message); }
+}
+
+// ================================================================ vessels
+function openVessels() {
+  document.getElementById('vesselNoKey').style.display =
+    (state.settings.aisstream_api_key || '').trim() ? 'none' : 'block';
+  renderVesselTable(); openModal('mdlVessel');
+}
+function renderVesselTable() {
+  const tb = document.getElementById('vesselTableBody'); tb.innerHTML = '';
+  Object.keys(state.vessels).sort().forEach(n => {
+    const v = state.vessels[n];
+    const tr = document.createElement('tr');
+    const pos = (v.lat != null) ? `${(+v.lat).toFixed(3)}, ${(+v.lon).toFixed(3)}` : '—';
+    tr.innerHTML = `<td>${esc(n)}</td><td>${esc(v.mmsi || '—')}</td><td>${pos}</td><td>${fmtAge(v) || '—'}</td>`;
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', () => {
+      tb.querySelectorAll('tr').forEach(r => r.style.background = '');
+      tr.style.background = '#dbeaff'; selectedVessel = n;
+      document.getElementById('vesName').value = n;
+      document.getElementById('vesMmsi').value = v.mmsi || '';
+      document.getElementById('vesOrigin').value = v.origin || '';
+      document.getElementById('vesDest').value = v.dest || '';
+    });
+    tb.appendChild(tr);
+  });
+}
+async function saveVessel() {
+  try {
+    const r = await api('/api/vessels', { method: 'POST', body: JSON.stringify({
+      name: document.getElementById('vesName').value,
+      mmsi: document.getElementById('vesMmsi').value,
+      origin: document.getElementById('vesOrigin').value,
+      dest: document.getElementById('vesDest').value }) });
+    state.vessels = r.vessels; renderVesselTable();
+  } catch (e) { toast(e.message); }
+}
+async function deleteVessel() {
+  if (!selectedVessel) { toast('Select a vessel in the table first'); return; }
+  const r = await api('/api/vessels/' + encodeURIComponent(selectedVessel), { method: 'DELETE' });
+  state.vessels = r.vessels; selectedVessel = null; renderVesselTable();
+  vesselTrack.clearLayers();   // remove any plotted origin->dest track
+  renderVessels();             // remove the deleted vessel's marker
+}
+async function fetchVessel() {
+  if (!selectedVessel) { toast('Select a vessel in the table first'); return; }
+  const btn = document.getElementById('btnVesFetch'); btn.disabled = true;
+  const status = document.getElementById('vesselStatus');
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    status.textContent = `Listening for ${selectedVessel}... ${Math.floor((Date.now() - t0) / 1000)}s ` +
+                         `(anchored vessels broadcast every ~3 min, max wait 4 min)`;
+  }, 1000);
+  try {
+    const r = await api('/api/vessels/' + encodeURIComponent(selectedVessel) + '/fetch', { method: 'POST', body: '{}' });
+    state.vessels[selectedVessel].lat = r.lat;
+    state.vessels[selectedVessel].lon = r.lon;
+    state.vessels[selectedVessel].updated = r.updated;
+    state.vessels[selectedVessel].updated_epoch = Date.now() / 1000;   // so "age" starts at 0s
+    renderVesselTable();
+    status.textContent = `Position received: ${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}`;
+    await plotVessel();
+  } catch (e) { status.textContent = e.message; }
+  clearInterval(tick); btn.disabled = false;
+}
+async function plotVessel() {
+  if (!selectedVessel) { toast('Select a vessel in the table first'); return; }
+  try {
+    const r = await api('/api/vessels/' + encodeURIComponent(selectedVessel) + '/plot', { method: 'POST', body: '{}' });
+    vesselTrack.clearLayers();
+    (r.route_lines || []).forEach(([coords, style]) =>
+      addLineWorld(coords, LINE_STYLES[style] || LINE_STYLES.vessel_dash, vesselTrack));
+    renderVessels();
+    map.setView([r.lat, r.lon], Math.max(map.getZoom(), 6));
+    closeModal('mdlVessel');
+  } catch (e) { toast(e.message); }
+}
+
+function fmtEtaDate(epoch) {
+  const d = new Date(epoch * 1000);
+  return d.toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short',
+                                day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+// ETA straight from a map popup (no tracker open) - draws route + toasts ETA
+async function etaForVessel(name) {
+  const v = state.vessels[name];
+  if (!v || v.lat == null || !v.dest) { toast('Vessel needs a position and destination'); return; }
+  try {
+    const r = await api('/api/vessels/' + encodeURIComponent(name) + '/eta', { method: 'POST', body: '{}' });
+    vesselTrack.clearLayers();
+    (r.route_lines || []).forEach(([coords, style]) =>
+      addLineWorld(coords, LINE_STYLES[style] || LINE_STYLES.vessel_dash, vesselTrack));
+    renderVessels();
+    map.closePopup();
+    toast(`${name} → ${r.dest}: ${fmtDist(r.distance_km)} at ${r.speed} kn, ` +
+          `ETA ${fmtEtaDate(r.eta_epoch)}`, 9000);
+  } catch (e) { toast(e.message); }
+}
+async function vesselEta() {
+  if (!selectedVessel) { toast('Select a vessel in the table first'); return; }
+  const v = state.vessels[selectedVessel];
+  if (!v || v.lat == null) { toast('Fetch the vessel position first'); return; }
+  if (!v.dest) { toast('Set a destination port for this vessel first'); return; }
+  const btn = document.getElementById('btnVesEta'); btn.disabled = true;
+  const status = document.getElementById('vesselStatus');
+  status.textContent = `Computing route to ${v.dest}…`;
+  try {
+    const r = await api('/api/vessels/' + encodeURIComponent(selectedVessel) + '/eta',
+      { method: 'POST', body: '{}' });
+    // draw the remaining route from the vessel's position to its destination
+    vesselTrack.clearLayers();
+    (r.route_lines || []).forEach(([coords, style]) =>
+      addLineWorld(coords, LINE_STYLES[style] || LINE_STYLES.vessel_dash, vesselTrack));
+    renderVessels();
+    const distTxt = fmtDist(r.distance_km);
+    status.innerHTML = `<b>${esc(selectedVessel)} → ${esc(r.dest)}</b><br>` +
+      `${distTxt} remaining at ${r.speed} kn → ${fmtHours(r.hours)}<br>` +
+      `<b>ETA: ${fmtEtaDate(r.eta_epoch)}</b>`;
+    map.setView([v.lat, v.lon], Math.max(map.getZoom(), 5));
+  } catch (e) { status.textContent = e.message; }
+  btn.disabled = false;
+}
+
+// ================================================================ layers
+// Background layers (routes, tracks, cables, borders...) uploaded in any of
+// the formats layer_manager.py reads. The files are shared through the app
+// folder; which of them you display is remembered per browser.
+let layerList = [];                       // rows from GET /api/layers
+const layerGeom = new Map();              // file -> features, fetched once
+const layerLayers = new Map();            // file -> L.layerGroup
+const layerGroup = L.layerGroup();        // the master group added to the map
+const layerOpen = new Set();              // files whose detail row is expanded
+
+function layerHidden() {                  // per-browser, so a big library isn't forced on anyone
+  try {
+    const raw = localStorage.getItem('layersHidden') ?? localStorage.getItem('cablesHidden') ?? '[]';
+    return new Set(JSON.parse(raw));
+  } catch (e) { return new Set(); }
+}
+function setLayerHidden(set) {
+  try { localStorage.setItem('layersHidden', JSON.stringify([...set])); } catch (e) {}
+}
+function layerVisible(file) { return !layerHidden().has(file); }
+function layersOn() { return document.getElementById('chkLayers').checked; }
+
+// ---- coordinate systems offered for uploads and DXF export
+const CRS_CHOICES = [
+  ['', 'Auto (from the file)'],
+  ['EPSG:4326', 'WGS84 latitude/longitude (EPSG:4326)'],
+  ...Array.from({ length: 11 }, (_, i) => [`EPSG:${32628 + i}`, `WGS84 / UTM ${28 + i}N (EPSG:${32628 + i})`]),
+  ...[31, 32, 33, 34, 35].map(z => [`EPSG:${25800 + z}`, `ETRS89 / UTM ${z}N (EPSG:${25800 + z})`]),
+  ['EPSG:23031', 'ED50 / UTM 31N (EPSG:23031)'],
+  ['EPSG:23032', 'ED50 / UTM 32N (EPSG:23032)'],
+  ['other', 'Other EPSG code…'],
+];
+function crsChoices() {
+  return LITE ? CRS_CHOICES.filter(([v]) => v === '' || /^EPSG:32[67]\d\d$/.test(v)) : CRS_CHOICES;
+}
+function fillCrsSelect(sel, value, autoLabel) {
+  sel.innerHTML = crsChoices().map(([v, t]) =>
+    `<option value="${v}">${esc(v === '' && autoLabel ? autoLabel : t)}</option>`).join('');
+  const other = crsOther(sel);
+  if (crsChoices().some(([v]) => v === (value || ''))) {
+    sel.value = value || '';
+    if (other) other.style.display = 'none';
+  } else {
+    sel.value = 'other';
+    if (other) { other.style.display = ''; other.value = value; }
+  }
+}
+function crsOther(sel) {               // the "EPSG code" box sits right after its select
+  const n = sel.nextElementSibling;
+  return n && n.tagName === 'INPUT' ? n : null;
+}
+function crsSelectChanged(sel) {
+  const other = crsOther(sel);
+  if (other) other.style.display = sel.value === 'other' ? '' : 'none';
+}
+function crsValue(sel) {
+  if (sel.value !== 'other') return sel.value;
+  const v = (crsOther(sel)?.value || '').trim();
+  return /^\d+$/.test(v) ? 'EPSG:' + v : v;
+}
+function crsLabel(v) {
+  const hit = CRS_CHOICES.find(([c]) => c === v);
+  return hit ? hit[1] : v;
+}
+
+// ---- list
+async function loadLayers() {
+  try { layerList = (await api('/api/layers')).layers; }
+  catch (e) { toast(e.message); }
+  renderLayerList();
+  if (layersOn()) await syncLayers();
+}
+
+function renderLayerList() {
+  document.getElementById('layerCount').textContent = layerList.length;
+  const box = document.getElementById('layerList'); box.innerHTML = '';
+  if (layerList.length === 0) {
+    box.innerHTML = '<div style="color:#98a3af;font-style:italic;padding:8px 10px;font-size:12px">' +
+      'No layers yet - use + Add to upload a route, track, cable or border.</div>';
+    return;
+  }
+  layerList.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'layer-item' + (c.error ? ' err' : '');
+    row.innerHTML =
+      `<input type="checkbox" title="Show on the map" ${layerVisible(c.file) && !c.error ? 'checked' : ''} ${c.error ? 'disabled' : ''}>
+       <input type="color" value="${esc(c.colour)}" title="Colour">
+       <input type="text" class="lname" value="${esc(c.name)}" title="${esc(c.file)} - click to rename">
+       <span class="llen">${c.error ? '⚠' : (c.length_km > 0 ? esc(fmtDist(c.length_km)) : c.features + ' pt')}</span>
+       <button title="Zoom to this layer" ${c.error ? 'disabled' : ''}>⤢</button>
+       <button title="Details, coordinate system, download">ⓘ</button>
+       <button class="del" title="Delete">✕</button>`;
+    const [chk, colour, nameInput] = row.querySelectorAll('input');
+    const [btnZoom, btnInfo, btnDel] = row.querySelectorAll('button');
+
+    chk.addEventListener('change', async () => {
+      const hidden = layerHidden();
+      chk.checked ? hidden.delete(c.file) : hidden.add(c.file);
+      setLayerHidden(hidden);
+      if (chk.checked && !layersOn()) { document.getElementById('chkLayers').checked = true; layerGroup.addTo(map); saveLayersOn(); }
+      await syncLayers();
+    });
+    colour.addEventListener('change', () => updateLayer(c, { colour: colour.value }));
+    nameInput.addEventListener('change', () => updateLayer(c, { name: nameInput.value }));
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur(); });
+    btnZoom.onclick = () => zoomToLayer(c.file);
+    btnInfo.onclick = () => {
+      layerOpen.has(c.file) ? layerOpen.delete(c.file) : layerOpen.add(c.file);
+      renderLayerList();
+    };
+    btnDel.onclick = async () => {
+      if (!confirm(`Delete "${c.name}" for everyone? The file is removed from the shared layers folder.`)) return;
+      try {
+        layerList = (await api('/api/layers/' + encodeURIComponent(c.file), { method: 'DELETE' })).layers;
+        layerGeom.delete(c.file); dropLayer(c.file);
+        await syncLayers(); renderLayerList();
+      } catch (e) { toast(e.message); }
+    };
+    box.appendChild(row);
+    if (c.error || layerOpen.has(c.file)) box.appendChild(layerDetail(c));
+  });
+}
+
+function layerDetail(c) {
+  const d = document.createElement('div');
+  d.className = 'layer-detail';
+  const ext = c.file.split('.').pop().toUpperCase();
+  d.innerHTML =
+    (c.error ? `<div class="lerr">${esc(c.error)}</div>` : '') +
+    `<div>${esc(c.file)} · ${ext} · ${(c.size / 1024).toFixed(0)} kB` +
+    (c.error ? '' : ` · ${c.features} feature(s), ${c.points.toLocaleString()} points`) + `</div>
+     <div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap">
+       <span>Coordinate system:</span>
+       <select style="max-width:250px"></select>
+       <input type="text" placeholder="EPSG code" style="display:none;width:90px">
+       <button class="btn-plain" style="padding:1px 8px">Apply</button>
+       <a href="#" class="dl" style="margin-left:auto">Download original</a>
+     </div>`;
+  d.querySelector('a.dl').onclick = e => { e.preventDefault(); downloadLayerFile(c.file); };
+  if (LITE) d.querySelector('div:last-child').querySelectorAll('span, select, input, button')
+    .forEach(el => el.style.display = 'none');
+  const sel = d.querySelector('select');
+  fillCrsSelect(sel, c.crs, c.crs_required ? 'Not set - choose one' : 'Auto (from the file)');
+  sel.onchange = () => crsSelectChanged(sel);
+  d.querySelector('button').onclick = async () => {
+    await updateLayer(c, { crs: crsValue(sel) });
+    if (!layerList.find(x => x.file === c.file)?.error) layerOpen.delete(c.file);
+    renderLayerList();
+  };
+  return d;
+}
+
+async function downloadLayerFile(file) {
+  try {
+    const r = await apiFetch('/api/layers/' + encodeURIComponent(file) + '/file');
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Download failed');
+    downloadBlob(await r.blob(), file);
+  } catch (e) { toast(e.message); }
+}
+
+async function updateLayer(c, body) {
+  try {
+    layerList = (await api('/api/layers/' + encodeURIComponent(c.file),
+      { method: 'POST', body: JSON.stringify(body) })).layers;
+    if ('crs' in body) layerGeom.delete(c.file);
+    dropLayer(c.file);                       // rebuild with the new colour / name / CRS
+    await syncLayers();
+  } catch (e) { toast(e.message); }
+  renderLayerList();
+}
+
+// ---- upload
+function openLayerUpload() {
+  const sel = document.getElementById('layerCrs');
+  let last = '';
+  try { last = localStorage.getItem('lastLayerCrs') || ''; } catch (e) {}
+  fillCrsSelect(sel, last);
+  document.getElementById('layerStatus').textContent = '';
+  document.getElementById('layerName').value = '';
+  openModal('mdlLayers');
+}
+
+async function uploadLayers() {
+  const input = document.getElementById('layerFile');
+  const files = [...input.files];
+  if (files.length === 0) { toast('Choose a file first'); return; }
+  const crs = crsValue(document.getElementById('layerCrs'));
+  const name = document.getElementById('layerName').value.trim();
+  try { localStorage.setItem('lastLayerCrs', crs); } catch (e) {}
+  const btn = document.getElementById('btnLayerUpload'); btn.disabled = true;
+  const status = document.getElementById('layerStatus');
+  const failed = [], added = [];
+  for (let i = 0; i < files.length; i++) {
+    status.textContent = `Uploading ${files[i].name} (${i + 1}/${files.length})…`;
+    const fd = new FormData(); fd.append('file', files[i]);
+    if (crs) fd.append('crs', crs);
+    if (name) fd.append('name', files.length > 1 ? `${name} ${i + 1}` : name);
+    try {
+      const r = await api('/api/layers', { method: 'POST', body: fd });
+      layerList = r.layers; added.push(r.file);
+    } catch (e) { failed.push(`${files[i].name}: ${e.message}`); }
+  }
+  btn.disabled = false;
+  renderLayerList();
+  if (added.length) {
+    document.getElementById('chkLayers').checked = true; saveLayersOn();
+    layerGroup.addTo(map);
+    const hidden = layerHidden(); added.forEach(f => hidden.delete(f)); setLayerHidden(hidden);
+    await syncLayers();
+    if (added.length === 1) await zoomToLayer(added[0], true);
+  }
+  if (failed.length) { status.textContent = failed.join(' · '); return; }
+  input.value = '';
+  closeModal('mdlLayers');
+  toast(`Added ${added.length} layer(s)`);
+}
+
+// ---- drawing
+async function layerFeatures(file) {
+  if (!layerGeom.has(file)) {
+    const r = await api('/api/layers/' + encodeURIComponent(file) + '/geometry');
+    layerGeom.set(file, r.features);
+  }
+  return layerGeom.get(file);
+}
+
+async function buildLayer(row) {
+  const feats = await layerFeatures(row.file);
+  const g = L.layerGroup();
+  const many = feats.filter(f => f.kind === 'point').length > 500;
+  feats.forEach(f => {
+    const title = f.name || row.name;
+    const popup = document.createElement('div');
+    popup.innerHTML = `<b>${esc(title)}</b><br><small>${esc(row.name)}</small>` +
+      (f.kind === 'line' ? `<br>Length: ${esc(fmtDist(f.length_km))}`
+                         : `<br>${esc(fmtLatLon(f.points[0][0], f.points[0][1]))}`) +
+      (f.description ? `<div style="max-width:260px;max-height:140px;overflow:auto;
+        margin-top:6px;padding-top:5px;border-top:1px solid #eee;color:#444;
+        white-space:pre-wrap">${esc(f.description)}</div>` : '');
+    if (f.kind === 'point') {
+      addMarkerWorld(f.points[0], ll => L.circleMarker(ll, { radius: many ? 2 : 4, color: row.colour,
+        weight: 2, fillColor: '#fff', fill: true, fillOpacity: 1, renderer: canvasRenderer })
+        .bindPopup(popup), g);
+    } else {
+      addLineWorld(f.points, { color: row.colour, weight: 2.5, opacity: 0.9,
+        renderer: canvasRenderer }, g).forEach(l => l.bindPopup(popup));
+    }
+  });
+  return g;
+}
+
+function dropLayer(file) {
+  const l = layerLayers.get(file);
+  if (l) { layerGroup.removeLayer(l); layerLayers.delete(file); }
+}
+
+// Bring the drawn layers in line with the list + the per-browser hidden set.
+async function syncLayers() {
+  await syncLayersOnMap();
+  refreshGlobe();
+}
+async function syncLayersOnMap() {
+  const wanted = new Set(layerList.filter(c => !c.error && layerVisible(c.file)).map(c => c.file));
+  for (const file of [...layerLayers.keys()]) if (!wanted.has(file)) dropLayer(file);
+  for (const row of layerList) {
+    if (!wanted.has(row.file) || layerLayers.has(row.file)) continue;
+    try {
+      const layer = await buildLayer(row);
+      layerLayers.set(row.file, layer);
+      layerGroup.addLayer(layer);
+    } catch (e) { toast(`${row.name}: ${e.message}`); }
+  }
+}
+
+function saveLayersOn() {
+  try { localStorage.setItem('layersOn', layersOn() ? '1' : '0'); } catch (e) {}
+}
+
+async function toggleLayers() {
+  saveLayersOn();
+  if (!layersOn()) { map.removeLayer(layerGroup); refreshGlobe(); return; }
+  layerGroup.addTo(map);
+  document.getElementById('statusBar').textContent = 'Loading layers…';
+  await syncLayers();
+  document.getElementById('statusBar').textContent = '';
+}
+
+async function zoomToLayer(file, quiet) {
+  const row = layerList.find(x => x.file === file);
+  try {
+    let b = row && row.bounds;
+    if (!b) {
+      const pts = (await layerFeatures(file)).flatMap(f => f.points);
+      if (pts.length === 0) { if (!quiet) toast('This layer has no coordinates'); return; }
+      b = L.latLngBounds(pts);
+    }
+    const hidden = layerHidden();
+    if (hidden.has(file)) { hidden.delete(file); setLayerHidden(hidden); renderLayerList(); }
+    if (!layersOn()) { document.getElementById('chkLayers').checked = true; saveLayersOn(); }
+    layerGroup.addTo(map);
+    await syncLayers();
+    const bb = L.latLngBounds(b);
+    if (bb.getNorthEast().equals(bb.getSouthWest())) map.setView(bb.getCenter(), 12);
+    else map.fitBounds(bb.pad(0.1));
+  } catch (e) { toast(e.message); }
+}
+
+// ================================================================ globe
+// A 3D globe view of the same route and visible layers (MapLibre GL JS,
+// vendored in static/vendor/maplibre and loaded only the first time the
+// globe is opened). Read-only: editing stays on the flat map.
+let globeMap = null, globeMarkers = [], globeLoading = null;
+
+function loadAsset(tag, attrs) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement(tag);
+    Object.assign(el, attrs);
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('Could not load ' + (attrs.src || attrs.href)));
+    document.head.appendChild(el);
+  });
+}
+function loadMapLibre() {
+  if (window.maplibregl) return Promise.resolve();
+  if (!globeLoading) {
+    globeLoading = Promise.all([
+      loadAsset('link', { rel: 'stylesheet', href: 'static/vendor/maplibre/maplibre-gl.css' }),
+      loadAsset('script', { src: 'static/vendor/maplibre/maplibre-gl.js' }),
+    ]);
+  }
+  return globeLoading;
+}
+function globeOpen() { return document.getElementById('globe').classList.contains('show'); }
+
+const GEBCO_WMS = 'https://wms.gebco.net/mapserv?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+  '&LAYERS=GEBCO_LATEST&STYLES=&FORMAT=image/png&CRS=EPSG:3857&WIDTH=256&HEIGHT=256' +
+  '&BBOX={bbox-epsg-3857}';
+function globeStyle() {
+  const osm = [CFG.tileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'];
+  return {
+    version: 8,
+    projection: { type: 'globe' },
+    sources: {
+      osm: { type: 'raster', tiles: osm, tileSize: 256, maxzoom: CFG.tileMaxZoom || 19,
+             attribution: CFG.tileAttribution || '&copy; OpenStreetMap contributors' },
+      gebco: { type: 'raster', tiles: [GEBCO_WMS], tileSize: 256, attribution: 'GEBCO' },
+      lines: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      points: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+    },
+    layers: [
+      { id: 'water', type: 'background', paint: { 'background-color': '#aad3df' } },
+      { id: 'osm-light', type: 'raster', source: 'osm', paint: { 'raster-saturation': -1, 'raster-contrast': -0.1 } },
+      { id: 'osm-street', type: 'raster', source: 'osm', layout: { visibility: 'none' } },
+      { id: 'gebco', type: 'raster', source: 'gebco', layout: { visibility: 'none' } },
+      { id: 'lines-solid', type: 'line', source: 'lines', filter: ['!', ['get', 'dashed']],
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'],
+                 'line-opacity': ['get', 'opacity'] } },
+      { id: 'lines-dashed', type: 'line', source: 'lines', filter: ['get', 'dashed'],
+        paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'],
+                 'line-opacity': ['get', 'opacity'], 'line-dasharray': [2, 2] } },
+      { id: 'points', type: 'circle', source: 'points',
+        paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-width': 2,
+                 'circle-stroke-color': ['get', 'color'] } },
+    ],
+  };
+}
+function globeBase(kind) {
+  if (!globeMap || !globeMap.isStyleLoaded()) return;
+  const show = { 'osm-light': kind === 'light', 'osm-street': kind === 'street', gebco: kind === 'depth' };
+  for (const [id, on] of Object.entries(show))
+    globeMap.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+}
+
+// The flat map's content as GeoJSON: the route lines (as drawn), the
+// visible background layers, and the route's points.
+function globeData() {
+  const lines = [], points = [];
+  const line = (coords, color, width, dashed, opacity, name) => {
+    if (!coords || coords.length < 2) return;
+    lines.push({ type: 'Feature', properties: { color, width, dashed, opacity, name },
+      geometry: { type: 'LineString', coordinates: unwrapLine(coords).map(p => [p[1], p[0]]) } });
+  };
+  if (layersOn()) {
+    for (const row of layerList) {
+      if (row.error || !layerVisible(row.file) || !layerGeom.has(row.file)) continue;
+      for (const f of layerGeom.get(row.file)) {
+        if (f.kind === 'line') line(f.points, row.colour, 2, false, 0.9, f.name || row.name);
+        else points.push({ type: 'Feature', properties: { color: row.colour, name: f.name || row.name },
+          geometry: { type: 'Point', coordinates: [f.points[0][1], f.points[0][0]] } });
+      }
+    }
+  }
+  for (const [coords, style] of lastLines) {
+    const st = LINE_STYLES[style] || LINE_STYLES.raw_ghost;
+    line(coords, st.color, st.weight || 3, !!st.dashArray, st.opacity ?? 1, style);
+  }
+  return { lines: { type: 'FeatureCollection', features: lines },
+           points: { type: 'FeatureCollection', features: points } };
+}
+
+function refreshGlobe() {
+  if (!globeMap || !globeOpen() || !globeMap.isStyleLoaded()) return;
+  const d = globeData();
+  globeMap.getSource('lines').setData(d.lines);
+  globeMap.getSource('points').setData(d.points);
+  globeMarkers.forEach(m => m.remove());
+  globeMarkers = routePoints().map(p => {
+    const el = document.createElement('div');
+    el.className = 'globe-pt'; el.title = p.name;
+    return new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(globeMap);
+  });
+}
+
+async function toggleGlobe() {
+  const box = document.getElementById('globe');
+  if (globeOpen()) {                       // back to flat, at the globe's position
+    box.classList.remove('show');
+    if (globeMap) {
+      const c = globeMap.getCenter();
+      map.setView([c.lat, wrapLon(c.lng)], Math.max(2, Math.round(globeMap.getZoom() + 1)));
+    }
+    return;
+  }
+  try {
+    document.getElementById('statusBar').textContent = 'Loading globe…';
+    await loadMapLibre();
+  } catch (e) {
+    toast(e.message); document.getElementById('statusBar').textContent = ''; return;
+  }
+  document.getElementById('statusBar').textContent = '';
+  box.classList.add('show');
+  const c = map.getCenter().wrap();
+  const zoom = Math.max(0.8, Math.min(map.getZoom() - 1, 6));
+  if (!globeMap) {
+    globeMap = new maplibregl.Map({ container: 'globe', style: globeStyle(),
+      center: [c.lng, c.lat], zoom, attributionControl: { compact: true } });
+    globeMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    globeMap.on('load', () => {
+      globeBase(document.getElementById('baseMap').value);
+      refreshGlobe();
+    });
+    let warned = false;
+    globeMap.on('error', e => {
+      if (warned || !(e && e.sourceId)) return;
+      warned = true;
+      toast('Some globe map tiles could not be loaded (offline or blocked). Routes are still shown.', 6000);
+    });
+  } else {
+    globeMap.resize();
+    globeMap.jumpTo({ center: [c.lng, c.lat], zoom });
+    refreshGlobe();
+  }
+}
+
+// ================================================================ converter
+async function convert(direction) {
+  try {
+    const body = direction === 'to_utm'
+      ? { direction, lat: document.getElementById('cvLat').value, lon: document.getElementById('cvLon').value }
+      : { direction, easting: document.getElementById('cvEast').value, northing: document.getElementById('cvNorth').value,
+          zone: document.getElementById('cvZone').value, letter: document.getElementById('cvLetter').value };
+    const r = await api('/api/convert', { method: 'POST', body: JSON.stringify(body) });
+    if (direction === 'to_utm') {
+      document.getElementById('cvEast').value = r.easting;
+      document.getElementById('cvNorth').value = r.northing;
+      document.getElementById('cvZone').value = r.zone;
+      document.getElementById('cvLetter').value = r.letter;
+    } else {
+      document.getElementById('cvLat').value = r.lat;
+      document.getElementById('cvLon').value = r.lon;
+    }
+  } catch (e) { toast(e.message); }
+}
+
+// ================================================================ save / load route
+// ---- save route: route file (.json, re-openable) or a map format
+function routePoints() {
+  return route.map(n => {
+    const c = state.locations[n] || state.temp_waypoints[n];
+    return c ? { name: n, lat: c[0], lon: c[1] } : null;
+  }).filter(Boolean);
+}
+// The drawn route as one polyline: the optimized route if the optimizer has
+// run, else the raw one. Pilot paths and port connections included, in order.
+function routeLine() {
+  const opt = lastLines.some(([, st]) => st === 'opt_solid' || st === 'opt_dashed');
+  const keep = opt ? ['opt_solid', 'opt_dashed', 'pilot_dashed']
+                   : ['raw_solid', 'raw_ghost', 'pilot_dashed'];
+  const out = [];
+  lastLines.filter(([, st]) => keep.includes(st)).forEach(([coords]) => {
+    coords.forEach((p, i) => {
+      const q = [+p[0], +p[1]];
+      const prev = out[out.length - 1];
+      if (prev && Math.abs(prev[0] - q[0]) < 1e-7 && Math.abs(prev[1] - q[1]) < 1e-7) return;
+      out.push(q);
+    });
+  });
+  return out;
+}
+function defaultRouteName() {
+  return route.length ? `${route[0]} - ${route[route.length - 1]}` : 'Route';
+}
+
+function openSave() {
+  if (!route.length) { toast('Route is empty'); return; }
+  document.getElementById('saveName').value = defaultRouteName();
+  fillCrsSelect(document.getElementById('saveCrs'), '', 'Auto - UTM zone of the route centre');
+  const sync = () => {
+    const fmt = document.querySelector('input[name=saveFmt]:checked').value;
+    document.getElementById('saveCrsRow').style.display = fmt === 'dxf' ? '' : 'none';
+  };
+  document.querySelectorAll('input[name=saveFmt]').forEach(r => r.onchange = sync);
+  sync();
+  if (!lastLines.length) {
+    document.getElementById('saveHelp').textContent = 'No route has been calculated yet, so map ' +
+      'formats will hold straight lines between the route points. Run CALCULATE RAW (or the ' +
+      'optimizer) first to export the sea route.';
+  }
+  openModal('mdlSave');
+}
+
+function saveRouteJson(name) {
+  const locs = {};
+  route.forEach(n => {
+    const c = state.locations[n] || state.temp_waypoints[n];
+    if (c) locs[n] = c;
+  });
+  const pilotage = {};
+  route.forEach(n => { if (state.pilotage[n]) pilotage[n] = state.pilotage[n]; });
+  const blob = new Blob([JSON.stringify({ route, locations: locs, pilotage, speeds: legSpeeds }, null, 4)],
+                        { type: 'application/json' });
+  downloadBlob(blob, (name || 'route').replace(/[<>:"/\\|?*]/g, '_') + '.json');
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function saveRouteFile() {
+  const fmt = document.querySelector('input[name=saveFmt]:checked').value;
+  const name = document.getElementById('saveName').value.trim() || defaultRouteName();
+  if (fmt === 'json') { saveRouteJson(name); closeModal('mdlSave'); return; }
+  const crs = crsValue(document.getElementById('saveCrs'));
+  const epsg = crs ? parseInt(crs.replace(/^EPSG:/i, '')) : null;
+  if (crs && !epsg) { toast('Enter the EPSG code as a number, e.g. 32632'); return; }
+  try {
+    const r = await apiFetch('/api/route/export', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ format: fmt, name, points: routePoints(), line: routeLine(), epsg }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Export failed (${r.status})`);
+    const fname = decodeURIComponent(r.headers.get('X-Export-Filename') || 'route');
+    downloadBlob(await r.blob(), fname);
+    const used = r.headers.get('X-Export-EPSG');
+    closeModal('mdlSave');
+    if (used) toast(`DXF saved in EPSG:${used} (metres). Upload it again with that coordinate system.`, 6000);
+  } catch (e) { toast(e.message); }
+}
+
+async function saveRouteAsLayer() {
+  const name = document.getElementById('saveName').value.trim() || defaultRouteName();
+  try {
+    const r = await api('/api/layers/from-route', { method: 'POST',
+      body: JSON.stringify({ name, points: routePoints(), line: routeLine() }) });
+    layerList = r.layers;
+    const hidden = layerHidden(); hidden.delete(r.file); setLayerHidden(hidden);
+    document.getElementById('chkLayers').checked = true; saveLayersOn(); layerGroup.addTo(map);
+    renderLayerList(); await syncLayers();
+    closeModal('mdlSave');
+    toast(`"${name}" added to Layers`);
+  } catch (e) { toast(e.message); }
+}
+
+// ---- share a route as a link (the route travels in the URL; nothing is stored)
+function b64urlEncode(str) {
+  return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(b64) {
+  const s = b64.replace(/-/g, '+').replace(/_/g, '/');
+  return decodeURIComponent(escape(atob(s + '==='.slice((s.length + 3) % 4))));
+}
+async function copyRouteLink() {
+  const pts = routePoints();
+  if (pts.length < 2) { toast('Add at least 2 points to the route first'); return; }
+  const payload = { v: 1, r: pts.map(p => [p.name, +p.lat.toFixed(6), +p.lon.toFixed(6)]),
+                    s: legSpeeds };
+  const url = location.origin + location.pathname + '#route=' + b64urlEncode(JSON.stringify(payload));
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link copied. Anyone running Sea Distances can open it to load this route.');
+  } catch (e) {
+    window.prompt('Copy this link:', url);
+  }
+}
+async function openRouteFromLink() {
+  const m = location.hash.match(/^#route=([A-Za-z0-9_-]+)/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const data = JSON.parse(b64urlDecode(m[1]));
+    const locations = {};
+    (data.r || []).forEach(([n, lat, lon]) => { locations[n] = [lat, lon]; });
+    const r = await api('/api/route/import', { method: 'POST',
+      body: JSON.stringify({ route: (data.r || []).map(x => x[0]), locations }) });
+    await refreshState();
+    route = r.route; renderRoute();
+    legSpeeds = Array.isArray(data.s) ? data.s.slice() : [];
+    if (route.length >= 2) await calculateRaw();
+    toast('Route loaded from link');
+  } catch (e) { toast('Could not open the route link: ' + e.message); }
+}
+
+async function loadRoute(input) {
+  const file = input.files[0]; input.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data.route)) {
+      throw new Error('this is not a Sea Distances route file. Map files (KML, GPX, ...) ' +
+                      'go in as background layers: use Add Layer.');
+    }
+    const r = await api('/api/route/import', { method: 'POST', body: JSON.stringify(data) });
+    await refreshState();
+    route = r.route; renderRoute();
+    legSpeeds = Array.isArray(data.speeds) ? data.speeds.slice() : [];
+    if (route.length >= 2) await calculateRaw();
+  } catch (e) { toast('Could not load route: ' + e.message); }
+}
+
+// remove all temp waypoints (start-of-session cleanup)
+async function clearTempPoints() {
+  const n = Object.keys(state.temp_waypoints || {}).length;
+  if (n === 0) { toast('No temporary waypoints to clear'); return; }
+  if (!confirm(`Remove all ${n} temporary waypoint(s)? Saved ports and pilot points are kept.`)) return;
+  try {
+    const r = await api('/api/waypoints', { method: 'DELETE' });
+    // drop any temp points from the current route too
+    const temps = new Set(Object.keys(state.temp_waypoints || {}));
+    route = route.filter(x => !temps.has(x));
+    await refreshState();
+    renderRoute();
+    toast(`Cleared ${r.removed} temporary waypoint(s)`);
+  } catch (e) { toast(e.message); }
+}
+
+// ================================================================ sidebar UX
+function toggleCard(id) {
+  const card = document.getElementById(id);
+  card.classList.toggle('collapsed');
+  const collapsed = {};
+  document.querySelectorAll('#sidebar .card').forEach(c =>
+    collapsed[c.id] = c.classList.contains('collapsed'));
+  localStorage.setItem('cardCollapsed', JSON.stringify(collapsed));
+}
+(function initCards() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('cardCollapsed') || '{}');
+    Object.entries(saved).forEach(([id, c]) => {
+      const el = document.getElementById(id);
+      if (el && c) el.classList.add('collapsed');
+    });
+  } catch (e) {}
+})();
+// drag-to-resize the sidebar width
+(function initResizer() {
+  const sidebar = document.getElementById('sidebar');
+  const rez = document.getElementById('sidebarResizer');
+  const saved = parseInt(localStorage.getItem('sidebarWidth') || '0');
+  if (saved >= 260 && saved <= 720) sidebar.style.width = saved + 'px';
+  let drag = false;
+  rez.addEventListener('pointerdown', e => {
+    drag = true; rez.classList.add('dragging'); rez.setPointerCapture(e.pointerId);
+  });
+  rez.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const w = Math.min(720, Math.max(260, e.clientX - sidebar.getBoundingClientRect().left));
+    sidebar.style.width = w + 'px';
+  });
+  rez.addEventListener('pointerup', e => {
+    if (!drag) return;
+    drag = false; rez.classList.remove('dragging');
+    localStorage.setItem('sidebarWidth', parseInt(sidebar.style.width));
+    map.invalidateSize();      // let Leaflet re-fit after the width change
+  });
+})();
+
+// ================================================================ init
+document.getElementById('baseMap').value =
+  BASE_KINDS.includes(localStorage.getItem('baseMap')) ? localStorage.getItem('baseMap') : 'light';
+async function refreshState() {
+  state = await api('/api/state');
+  document.getElementById('appVersion').textContent = state.version ? 'v' + state.version : '';
+  renderAll();
+}
+if (LITE) {
+  document.body.classList.add('lite');
+  document.querySelector('#topbar h1').firstChild.textContent = '⚓ ' + (CFG.title || 'Sea Distances Lite') + ' ';
+  document.getElementById('btnCalc').textContent = 'CALCULATE ROUTE';
+  document.getElementById('libFilter').placeholder = 'Search ports (about 4,000 world ports)...';
+  document.getElementById('layerFile').accept = '.kml,.kmz,.geojson,.json,.gpx,.csv,.txt,.xlsx';
+  document.getElementById('legend').innerHTML = '<h4>Map Legend</h4>' +
+    '<span class="leg-line" style="border-top:3px solid #2196F3"></span>Route (shipping lanes)<br>' +
+    '<span class="leg-line" style="border-top:2px dashed gray"></span>Port connection<br>' +
+    '<span class="leg-line" style="border-top:2px dashed orange"></span>Pilotage Point<br>' +
+    '<span style="font-size:14px">➤</span> Direction Arrow';
+  window.LiteBackend.preload();
+}
+try { document.getElementById('chkLayers').checked = localStorage.getItem('layersOn') !== '0'; } catch (e) {}
+if (layersOn()) layerGroup.addTo(map);
+refreshState()
+  .then(() => { loadLayers(); openRouteFromLink(); })
+  .catch(e => toast('Could not reach server: ' + e.message));
+window.addEventListener('hashchange', openRouteFromLink);
+</script>
+</body>
+</html>
